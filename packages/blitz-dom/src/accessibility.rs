@@ -566,7 +566,10 @@ mod tests {
 
         // The document node takes the viewport's bounds.
         let document_bounds = find(root_id).bounds().unwrap();
-        assert_eq!((document_bounds.width(), document_bounds.height()), (800.0, 600.0));
+        assert_eq!(
+            (document_bounds.width(), document_bounds.height()),
+            (800.0, 600.0)
+        );
 
         // Page text is static text, its text the label's value.
         assert_eq!(find(text).role(), accesskit::Role::Label);
