@@ -13,7 +13,10 @@ impl BaseDocument {
         let mut described_by_nodes = Vec::new();
 
         self.visit(|node_id, node| {
-            if node.is_hidden_from_accessibility_tree()
+            // Whitespace between elements is layout, not content.
+            let blank_text = node.is_text_node() && node.text_content().trim().is_empty();
+            if blank_text
+                || node.is_hidden_from_accessibility_tree()
                 || node
                     .parent
                     .map(|p| hidden_nodes.contains(&p))
@@ -126,7 +129,10 @@ impl BaseDocument {
             let role = role_attr
                 .and_then(role_from_name)
                 .or_else(|| role_from_element_data(element_data))
-                .unwrap_or(Role::Unknown);
+                // An element with no semantics of its own (a `div`, a `span`)
+                // is a generic container, which adapters pass through, as a
+                // browser's tree does; `Unknown` is shown as an unnamed element.
+                .unwrap_or(Role::GenericContainer);
 
             builder.set_role(role);
 
@@ -172,14 +178,40 @@ impl BaseDocument {
 
             builder.set_html_tag(name);
         } else if node.is_text_node() {
-            builder.set_role(Role::TextRun);
-            builder.set_value(node.text_content());
+            // A text run belongs to a text field's editing model, and every
+            // adapter drops it from the tree outside one. The page's own text
+            // is static text: a label, whose text is its value by AccessKit's
+            // convention (which the iOS adapter follows strictly).
+            if self.in_text_field(node) {
+                builder.set_role(Role::TextRun);
+                builder.set_value(node.text_content());
+            } else {
+                let mut text = FlatText::default();
+                text.push(&node.text_content());
+                builder.set_role(Role::Label);
+                builder.set_value(text.text);
+            }
             parent.push_labelled_by(id)
         }
 
         parent.push_child(id);
 
         (id, builder)
+    }
+
+    /// Whether a text node is inside an `input` or a `textarea`.
+    fn in_text_field(&self, node: &BlitzDomNode) -> bool {
+        let mut at = node.parent;
+        while let Some(id) = at {
+            let n = &self.nodes[id];
+            if let Some(e) = n.element_data()
+                && matches!(&*e.name.local, "input" | "textarea")
+            {
+                return true;
+            }
+            at = n.parent;
+        }
+        false
     }
 
     /// The node's bounding box in physical pixels relative to the viewport origin,
@@ -511,6 +543,12 @@ mod tests {
         // The document node takes the viewport's bounds.
         let document_bounds = find(root_id).bounds().unwrap();
         assert_eq!((document_bounds.width(), document_bounds.height()), (800.0, 600.0));
+
+        // Page text is static text, its text the label's value.
+        assert_eq!(find(text).role(), accesskit::Role::Label);
+        assert_eq!(find(text).value(), Some("some text"));
+        // A `div` is a generic container, passed through.
+        assert_eq!(find(div).role(), accesskit::Role::GenericContainer);
 
         let body_bounds = find(body).bounds().unwrap();
         assert_eq!(body_bounds.x0, 0.0);
