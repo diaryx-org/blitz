@@ -7,10 +7,10 @@ use parley::{
 };
 use style::properties::ComputedValues;
 
+use super::text_transform::{CaseTransform, PushedText, TextTransformer};
 use super::{MarkerLayout, TextBrush, TextContext, TextLayout, style as stylo_to_parley};
 use crate::Node;
 use crate::layout::inline::push_inline_content;
-use crate::layout::text_transform::{CaseTransform, PushedText, TextTransformer};
 use crate::node::Marker;
 use crate::text::{InlineBoxKind, InlineBuilder, MarkerEngine, SpanKind};
 
