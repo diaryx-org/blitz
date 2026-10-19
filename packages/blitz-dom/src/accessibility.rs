@@ -186,6 +186,13 @@ impl BaseDocument {
     /// which is the coordinate space AccessKit expects for `bounds`. Text nodes have
     /// no layout box of their own, so they use their parent element's bounds.
     fn accessibility_bounds(&self, node: &BlitzDomNode) -> Option<Rect> {
+        // The document has no box of its own: it is the viewport. Without
+        // bounds it is a 0×0 element, which some consumers (XCUITest) take
+        // to hide everything under it.
+        if node.parent.is_none() {
+            let (width, height) = self.viewport().window_size;
+            return Some(Rect::new(0.0, 0.0, width as f64, height as f64));
+        }
         let node_id = if node.is_text_node() {
             node.parent?
         } else if node.is_element() || node.parent.is_none() {
@@ -500,6 +507,10 @@ mod tests {
 
         // Text nodes inherit their parent element's bounds.
         assert_eq!(find(text).bounds().unwrap(), div_bounds);
+
+        // The document node takes the viewport's bounds.
+        let document_bounds = find(root_id).bounds().unwrap();
+        assert_eq!((document_bounds.width(), document_bounds.height()), (800.0, 600.0));
 
         let body_bounds = find(body).bounds().unwrap();
         assert_eq!(body_bounds.x0, 0.0);
