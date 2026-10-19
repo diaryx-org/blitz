@@ -1,7 +1,7 @@
 use crate::{
     BaseDocument, ElementData, Node as BlitzDomNode, NodeData, NodeId as BlitzDomNodeId, local_name,
 };
-use accesskit::{Node as AccessKitNode, NodeId, Rect, Role, TreeId, TreeInfo, TreeUpdate};
+use accesskit::{Action, Node as AccessKitNode, NodeId, Rect, Role, TreeId, TreeInfo, TreeUpdate};
 use style::properties::longhands::visibility;
 
 impl BaseDocument {
@@ -135,6 +135,12 @@ impl BaseDocument {
                 .unwrap_or(Role::GenericContainer);
 
             builder.set_role(role);
+
+            // What a click would do, assistive tech may ask for: a press of a
+            // button, a link, a menu item, a choice. The host carries it out.
+            if takes_click(role) {
+                builder.add_action(Action::Click);
+            }
 
             // https://www.w3.org/TR/wai-aria-1.2/#tree_exclusion
             if element_data.attr(local_name!("aria-hidden")) == Some("true") {
@@ -309,6 +315,23 @@ impl FlatText {
         self.text.clear();
         self.pending_space = false;
     }
+}
+
+/// Whether assistive tech may ask a node of `role` to be clicked.
+fn takes_click(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Button
+            | Role::Link
+            | Role::MenuItem
+            | Role::MenuItemCheckBox
+            | Role::MenuItemRadio
+            | Role::CheckBox
+            | Role::RadioButton
+            | Role::Tab
+            | Role::ListBoxOption
+            | Role::Switch
+    )
 }
 
 fn role_from_name(name: &str) -> Option<Role> {
@@ -513,7 +536,8 @@ mod tests {
         let body = mutator.create_element(qual_name!("body"), vec![]);
         let div = mutator.create_element(qual_name!("div"), vec![]);
         let text = mutator.create_text_node("some text");
-        mutator.append_children(div, &[text]);
+        let button = mutator.create_element(qual_name!("button"), vec![]);
+        mutator.append_children(div, &[text, button]);
         mutator.append_children(body, &[div]);
         mutator.append_children(html, &[body]);
         mutator.append_children(root_id, &[html]);
@@ -547,6 +571,9 @@ mod tests {
         // Page text is static text, its text the label's value.
         assert_eq!(find(text).role(), accesskit::Role::Label);
         assert_eq!(find(text).value(), Some("some text"));
+        // A button may be clicked by assistive tech; a div may not.
+        assert!(find(button).supports_action(accesskit::Action::Click));
+        assert!(!find(div).supports_action(accesskit::Action::Click));
         // A `div` is a generic container, passed through.
         assert_eq!(find(div).role(), accesskit::Role::GenericContainer);
 
