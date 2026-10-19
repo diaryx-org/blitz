@@ -18,9 +18,21 @@ carries what we need now.
 ```toml
 [patch.crates-io]
 blitz-dom = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+blitz-traits = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+blitz-shell = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+blitz-paint = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+stylo_taffy = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+debug_timer = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+# and blitz-net, blitz-html, accesskit_xplat where the graph has them
 ```
 
-Patch only the crates the branch changes; the rest stay crates.io's.
+Patch **every** crate of this repository that is in the graph, not only the
+ones `leaf` changes: they depend on each other by path, so one taken from
+crates.io beside them is a second copy of it, and the build fails on two
+`blitz-traits`. Cargo warns of a patch the graph does not use; drop it.
+
+Not `dioxus-native` or `dioxus-native-dom`: this repository's copies are an
+older line (0.7) than the published 0.8 alphas, which stay crates.io's.
 
 ## Keeping it
 
