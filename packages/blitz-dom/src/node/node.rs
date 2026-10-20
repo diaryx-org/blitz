@@ -1730,7 +1730,9 @@ impl Node {
                 if id == inline_root_id {
                     return false;
                 }
-                match self.with(id).parent {
+                // PATCH(diaryx): the inline layout is rebuilt only when the
+                // document resolves, so it can name a node already removed.
+                match self.tree().get(id).and_then(|n| n.parent) {
                     Some(parent) => id = parent,
                     None => return false,
                 }
