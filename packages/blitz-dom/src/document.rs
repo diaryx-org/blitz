@@ -888,7 +888,39 @@ impl BaseDocument {
     /// it so that stale NodeIds are never dereferenced after the slot is freed.
     pub(crate) fn remove_node_from_tree(&mut self, node_id: NodeId) -> Option<Node> {
         self.clear_interaction_state_for_removed_node(node_id);
+        self.forget_layout_child(node_id);
         self.nodes.remove(node_id)
+    }
+
+    /// Take `node_id`, which is leaving the slab, out of its layout parent's
+    /// layout and paint children, and mark that parent for layout again.
+    ///
+    /// A container's layout children are rebuilt only when it is laid out,
+    /// and one under `display: none` is not: a child removed meanwhile (a
+    /// hidden dialog whose content changed) stayed in its list, and showing
+    /// the container laid out a node no longer in the slab.
+    fn forget_layout_child(&mut self, node_id: NodeId) {
+        let Some(parent_id) = self.nodes.get(node_id).and_then(|n| n.layout_parent.get()) else {
+            return;
+        };
+        if parent_id == node_id {
+            return;
+        }
+        let Some(parent) = self.nodes.get_mut(parent_id) else {
+            return;
+        };
+        let mut changed = false;
+        for list in [&parent.layout_children, &parent.paint_children] {
+            if let Some(children) = list.borrow_mut().as_mut() {
+                let before = children.len();
+                children.retain(|id| *id != node_id);
+                changed |= children.len() != before;
+            }
+        }
+        if changed {
+            parent.insert_damage(ALL_DAMAGE);
+            parent.mark_ancestors_dirty();
+        }
     }
 
     /// The nearest element ancestor of `node_id` that is still in the

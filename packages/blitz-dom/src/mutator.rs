@@ -1394,6 +1394,49 @@ mod test {
         assert_eq!(document.stylist_device().media_type(), MediaType::print());
     }
 
+    /// A child removed from a box under `display: none` leaves no trace in
+    /// the layout of the box once it is shown again.
+    #[test]
+    fn a_child_removed_while_hidden_is_not_laid_out_when_shown() {
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        doc.add_user_agent_stylesheet(crate::document::UserAgentStylesheet::parse(
+            "html, body, div { display: block; }",
+        ));
+        let root_id = doc.root_node().id;
+        let mut m = doc.mutate();
+        let html = m.create_element(qual_name!("html"), vec![]);
+        let place = m.create_element(qual_name!("div"), vec![]);
+        let dialog = m.create_element(qual_name!("div"), vec![]);
+        let message = m.create_element(qual_name!("div"), vec![]);
+        let text = m.create_text_node("a message");
+        let title = m.create_text_node("a title");
+        m.append_children(message, &[text]);
+        m.append_children(dialog, &[title, message]);
+        m.append_children(place, &[dialog]);
+        m.append_children(html, &[place]);
+        m.append_children(root_id, &[html]);
+        drop(m);
+        doc.resolve(0.0);
+
+        // Hidden, its content changed, and shown again.
+        doc.mutate().set_style_property(place, "display", "none");
+        doc.resolve(0.0);
+        doc.mutate().remove_and_drop_node(message);
+        doc.resolve(0.0);
+        doc.mutate().set_style_property(place, "display", "block");
+        doc.resolve(0.0);
+
+        let children = doc.nodes[dialog]
+            .layout_children
+            .borrow()
+            .clone()
+            .unwrap_or_default();
+        assert!(children.iter().all(|id| doc.nodes.contains_key(*id)));
+    }
+
     #[test]
     fn mutator_remove_disabled() {
         let mut document = BaseDocument::new(DocumentConfig::default());
