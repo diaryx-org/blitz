@@ -1,7 +1,10 @@
 use crate::{
     BaseDocument, ElementData, Node as BlitzDomNode, NodeData, NodeId as BlitzDomNodeId, local_name,
 };
-use accesskit::{Action, Node as AccessKitNode, NodeId, Rect, Role, TreeId, TreeInfo, TreeUpdate};
+use accesskit::{
+    Action, Node as AccessKitNode, NodeId, Orientation, Rect, Role, Toggled, TreeId, TreeInfo,
+    TreeUpdate,
+};
 use style::properties::longhands::visibility;
 
 impl BaseDocument {
@@ -153,9 +156,13 @@ impl BaseDocument {
                 builder.set_expanded(aria_expanded);
             }
 
-            if element_data.attr(local_name!("aria-disabled")) == Some("true") {
+            if element_data.attr(local_name!("aria-disabled")) == Some("true")
+                || element_data.attr(local_name!("disabled")).is_some()
+            {
                 builder.set_disabled();
             }
+
+            write_aria_states(element_data, role, &mut builder);
 
             if let Some(aria_selected) = element_data.attr(local_name!("aria-selected"))
                 && let Ok(aria_selected) = aria_selected.parse()
@@ -317,6 +324,88 @@ impl FlatText {
     }
 }
 
+/// An attribute by name, for the ARIA attributes markup5ever has no atom
+/// for.
+fn attr<'a>(element_data: &'a ElementData, name: &str) -> Option<&'a str> {
+    element_data
+        .attrs()
+        .iter()
+        .find(|a| &*a.name.local == name)
+        .map(|a| &*a.value)
+}
+
+/// `true`, `false` or `mixed`, as ARIA's tristate attributes take them.
+fn tristate(value: &str) -> Option<Toggled> {
+    match value.trim() {
+        "true" => Some(Toggled::True),
+        "false" => Some(Toggled::False),
+        "mixed" => Some(Toggled::Mixed),
+        _ => None,
+    }
+}
+
+/// The states ARIA gives a widget, as AccessKit's: whether it is ticked or
+/// pressed, its value and range, whether a dialog is modal, which way a
+/// group runs. And a native checkbox's or radio button's `checked`.
+fn write_aria_states(element_data: &ElementData, role: Role, builder: &mut AccessKitNode) {
+    // https://www.w3.org/TR/wai-aria-1.2/#aria-checked
+    let checkable = matches!(
+        role,
+        Role::CheckBox
+            | Role::Switch
+            | Role::RadioButton
+            | Role::MenuItemCheckBox
+            | Role::MenuItemRadio
+            | Role::ListBoxOption
+            | Role::TreeItem
+    );
+    let checked = attr(element_data, "aria-checked").and_then(tristate);
+    if checkable && let Some(t) = checked {
+        builder.set_toggled(t);
+    } else if checkable
+        && &*element_data.name.local == "input"
+        && matches!(
+            element_data.attr(local_name!("type")),
+            Some("checkbox") | Some("radio")
+        )
+    {
+        let on = element_data
+            .checkbox_input_checked()
+            .unwrap_or(element_data.attr(local_name!("checked")).is_some());
+        builder.set_toggled(if on { Toggled::True } else { Toggled::False });
+    }
+    // https://www.w3.org/TR/wai-aria-1.2/#aria-pressed: a toggle button.
+    if role == Role::Button
+        && let Some(t) = attr(element_data, "aria-pressed").and_then(tristate)
+    {
+        builder.set_toggled(t);
+    }
+
+    // https://www.w3.org/TR/wai-aria-1.2/#aria-valuenow
+    let number = |name| attr(element_data, name).and_then(|v| v.trim().parse::<f64>().ok());
+    if let Some(v) = number("aria-valuenow") {
+        builder.set_numeric_value(v);
+    }
+    if let Some(v) = number("aria-valuemin") {
+        builder.set_min_numeric_value(v);
+    }
+    if let Some(v) = number("aria-valuemax") {
+        builder.set_max_numeric_value(v);
+    }
+    if let Some(text) = attr(element_data, "aria-valuetext") {
+        builder.set_value(text);
+    }
+
+    if attr(element_data, "aria-modal") == Some("true") {
+        builder.set_modal();
+    }
+    match attr(element_data, "aria-orientation") {
+        Some("horizontal") => builder.set_orientation(Orientation::Horizontal),
+        Some("vertical") => builder.set_orientation(Orientation::Vertical),
+        _ => {}
+    }
+}
+
 /// Whether assistive tech may ask a node of `role` to be clicked.
 fn takes_click(role: Role) -> bool {
     matches!(
@@ -349,6 +438,10 @@ fn role_from_name(name: &str) -> Option<Role> {
         "menuitemcheckbox" => Some(Role::MenuItemCheckBox),
         "menuitemradio" => Some(Role::MenuItemRadio),
         "option" => Some(Role::ListBoxOption),
+        "switch" => Some(Role::Switch),
+        "separator" => Some(Role::Splitter),
+        "searchbox" => Some(Role::SearchInput),
+        "none" | "presentation" => Some(Role::GenericContainer),
         "progressbar" => Some(Role::ProgressIndicator),
         "radio" => Some(Role::RadioButton),
         "scrollbar" => Some(Role::ScrollBar),
@@ -475,6 +568,10 @@ fn role_from_element_data(element_data: &ElementData) -> Option<Role> {
             None => Some(Role::ComboBox),
         },
         "option" => Some(Role::ListBoxOption),
+        "switch" => Some(Role::Switch),
+        "separator" => Some(Role::Splitter),
+        "searchbox" => Some(Role::SearchInput),
+        "none" | "presentation" => Some(Role::GenericContainer),
         "textarea" => Some(Role::MultilineTextInput),
         "progress" => Some(Role::ProgressIndicator),
         "meter" => Some(Role::Meter),
@@ -583,5 +680,81 @@ mod tests {
         let body_bounds = find(body).bounds().unwrap();
         assert_eq!(body_bounds.x0, 0.0);
         assert_eq!(body_bounds.width(), 800.0);
+    }
+
+    #[test]
+    fn aria_states_are_accesskits() {
+        use crate::Attribute;
+        use accesskit::{Role, Toggled};
+
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        let root_id = doc.root_node().id;
+        let at = |pairs: &[(&str, &str)]| -> Vec<Attribute> {
+            pairs
+                .iter()
+                .map(|(n, v)| Attribute {
+                    name: crate::QualName::new(None, crate::ns!(), crate::LocalName::from(*n)),
+                    value: v.to_string(),
+                })
+                .collect()
+        };
+        let mut mutator = doc.mutate();
+        let html = mutator.create_element(qual_name!("html"), vec![]);
+        let check = mutator.create_element(
+            qual_name!("div"),
+            at(&[("role", "checkbox"), ("aria-checked", "true")]),
+        );
+        let switch = mutator.create_element(
+            qual_name!("div"),
+            at(&[("role", "switch"), ("aria-checked", "false")]),
+        );
+        let toggle = mutator.create_element(qual_name!("button"), at(&[("aria-pressed", "mixed")]));
+        let slider = mutator.create_element(
+            qual_name!("div"),
+            at(&[
+                ("role", "slider"),
+                ("aria-valuenow", "0.4"),
+                ("aria-valuemin", "0"),
+                ("aria-valuemax", "1"),
+                ("aria-valuetext", "40%"),
+                ("aria-orientation", "horizontal"),
+            ]),
+        );
+        let dialog = mutator.create_element(
+            qual_name!("div"),
+            at(&[("role", "dialog"), ("aria-modal", "true")]),
+        );
+        let off = mutator.create_element(qual_name!("button"), at(&[("disabled", "")]));
+        let rule = mutator.create_element(qual_name!("div"), at(&[("role", "separator")]));
+        mutator.append_children(html, &[check, switch, toggle, slider, dialog, off, rule]);
+        mutator.append_children(root_id, &[html]);
+        drop(mutator);
+        doc.resolve(0.0);
+
+        let update = doc.build_accessibility_tree();
+        let find = |id: crate::NodeId| {
+            update
+                .nodes
+                .iter()
+                .find(|(n, _)| *n == NodeId(id.as_u64()))
+                .map(|(_, node)| node)
+                .unwrap()
+        };
+        assert_eq!(find(check).toggled(), Some(Toggled::True));
+        assert_eq!(find(switch).role(), Role::Switch);
+        assert_eq!(find(switch).toggled(), Some(Toggled::False));
+        assert_eq!(find(toggle).toggled(), Some(Toggled::Mixed));
+        let s = find(slider);
+        assert_eq!(s.numeric_value(), Some(0.4));
+        assert_eq!(s.min_numeric_value(), Some(0.0));
+        assert_eq!(s.max_numeric_value(), Some(1.0));
+        assert_eq!(s.value(), Some("40%"));
+        assert_eq!(s.orientation(), Some(accesskit::Orientation::Horizontal));
+        assert!(find(dialog).is_modal());
+        assert!(find(off).is_disabled());
+        assert_eq!(find(rule).role(), Role::Splitter);
     }
 }
