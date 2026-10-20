@@ -73,6 +73,20 @@ Events and layout, found by diaryx-org/unit's gallery:
   to the nearest element the press and the release share.
 - A node removed under `display: none` is forgotten by its layout parent.
 
+From Diaryx's iOS and Mac app, which carried them as patches of the
+published crates (`apps/diaryx/patches` there):
+
+- The hit test and the inline fragment walk skip a node removed since the
+  last layout, where they panicked on a pointer event between a mutation
+  and the next layout.
+- A `<style>`'s sheet goes into the stylist in document order, not by node
+  id, which a reused slot made arbitrary.
+- A touch fling slows as UIKit's scroll view does: the finger's own speed,
+  0.998 of it kept a millisecond.
+- The viewport is the whole window on every platform: the shell no longer
+  subtracts the safe area or paints its margins white, and a page keeps
+  clear of the notch itself (`Window::safe_area`).
+
 And the winit backends dioxus-native pins, patched, in `patches/`:
 `winit-appkit` (the Mac's text input client answers about the text round the
 caret: accents, the emoji picker, dictation) and `winit-uikit` (the UIScene
