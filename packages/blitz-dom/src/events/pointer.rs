@@ -597,15 +597,36 @@ pub(crate) fn handle_pointerup<F: FnMut(DomEvent)>(
         }
     }
 
+    // A click goes to the nearest element the press and the release were both
+    // in: none at all where a press began in something that has since gone
+    // from under the pointer, a menu's backdrop say, and the release lands
+    // on what was under it. https://w3c.github.io/uievents/#click
+    let click_target = match doc.mousedown_node_id {
+        Some(down) => {
+            let up = doc.node_chain(target);
+            doc.node_chain(down).into_iter().find(|id| up.contains(id))
+        }
+        None => Some(target),
+    };
+
     // Dispatch a click event
-    if do_click && event.button == MouseEventButton::Main {
-        dispatch_event(DomEvent::new(target, DomEventData::Click(event.clone())));
+    if do_click
+        && event.button == MouseEventButton::Main
+        && let Some(click_target) = click_target
+    {
+        dispatch_event(DomEvent::new(
+            click_target,
+            DomEventData::Click(event.clone()),
+        ));
     }
 
     // Dispatch a context menu event
-    if do_click && event.button == MouseEventButton::Secondary {
+    if do_click
+        && event.button == MouseEventButton::Secondary
+        && let Some(click_target) = click_target
+    {
         dispatch_event(DomEvent::new(
-            target,
+            click_target,
             DomEventData::ContextMenu(event.clone()),
         ));
     }
@@ -801,6 +822,20 @@ pub(crate) fn handle_click(
                     text_data.content = text_content;
                 }
                 _ => {}
+            }
+
+            // Anything else that can be focused is, as a browser focuses a
+            // button or an element with a `tabindex` that is pressed: its
+            // keys then reach it, and bubble from it.
+            if doc.nodes[node_id].is_focussable() {
+                generate_focus_events(
+                    doc,
+                    &mut |doc| {
+                        doc.set_focus_to(node_id);
+                    },
+                    dispatch_event,
+                );
+                break 'matched true;
             }
 
             // No match. Recurse up to parent.
