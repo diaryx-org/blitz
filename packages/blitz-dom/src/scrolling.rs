@@ -727,21 +727,31 @@ impl BaseDocument {
                     .unwrap()
                     .as_millis() as u64 as f64;
 
-                let time_diff_ms = time_ms - fling_state.last_seen_time;
+                let time_diff_ms = (time_ms - fling_state.last_seen_time).clamp(0.0, 100.0);
 
-                // 0.95 @ 60fps normalized to actual frame times
-                let deceleration = 1.0 - ((0.05 / 16.66666) * time_diff_ms);
-
-                fling_state.x_velocity *= deceleration;
-                fling_state.y_velocity *= deceleration;
+                // PATCH(diaryx): UIKit's deceleration, exponential and exact
+                // over any frame time: `UIScrollView.DecelerationRate.normal`
+                // keeps 0.998 of the speed a millisecond, and the distance
+                // over `dt` is the integral of that, so a late frame moves as
+                // far as two on time. (Blitz decayed by 0.95 a 60 Hz frame,
+                // linearly, and stopped at 0.1 px/ms, an abrupt halt.) The
+                // same curve as leaf-dioxus's `kinetic.rs`, which the editor
+                // glides by.
+                const DECELERATION: f64 = 0.998;
+                let kept = DECELERATION.powf(time_diff_ms);
+                let travel = (kept - 1.0) / DECELERATION.ln();
+                let dx = fling_state.x_velocity * travel;
+                let dy = fling_state.y_velocity * travel;
+                fling_state.x_velocity *= kept;
+                fling_state.y_velocity *= kept;
                 fling_state.last_seen_time = time_ms;
                 let fling_state = fling_state.clone();
 
-                let dx = fling_state.x_velocity * time_diff_ms;
-                let dy = fling_state.y_velocity * time_diff_ms;
-
-                self.scroll_chain_by(Some(fling_state.target), dx, dy, &mut |_| {});
-                if fling_state.x_velocity.abs() < 0.1 && fling_state.y_velocity.abs() < 0.1 {
+                let moved = self.scroll_chain_by(Some(fling_state.target), dx, dy, &mut |_| {});
+                // Stopped by its speed, or by an end: nothing left to scroll.
+                if (fling_state.x_velocity.abs() < 0.01 && fling_state.y_velocity.abs() < 0.01)
+                    || (!moved && time_diff_ms > 0.0)
+                {
                     self.scroll_animation = ScrollAnimationState::None;
                 }
             }

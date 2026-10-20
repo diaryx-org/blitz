@@ -58,11 +58,12 @@ In blitz-dom, on this fork, all platform-neutral:
 
 In the host (`src/main.rs`), what blitz-shell would do on iOS:
 
-4. **The safe area.** blitz-shell lays the page out inside the window's safe
-   area, and the adapter places nodes in the view, which is the whole screen:
-   the tree's root is translated by the safe area's insets, and a click asked
-   for is placed with them. Without it every frame was 62 pt too high, and a
-   tap at an element's frame missed it.
+4. **The safe area**, which needs nothing now. blitz-shell used to lay the
+   page out inside the window's safe area while the adapter placed nodes in
+   the whole screen, and every frame was 62 pt too high until the host moved
+   the tree's root by the insets. The shell's viewport is now the whole
+   window, so the two agree; the page keeps clear of the status bar itself
+   (`main`'s padding).
 5. **Carrying out an action request.** blitz-shell's `BlitzApplication`
    now does (a click, through `View::click_events`), but goes through
    `accesskit_xplat`; this example, on `accesskit_ios`, asks `click_events`

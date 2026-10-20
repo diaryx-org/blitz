@@ -129,19 +129,11 @@ impl App {
             return;
         };
         let doc = view.doc.inner();
-        // blitz-shell lays the page out inside the window's safe area (below
-        // the status bar on iOS); the adapter places nodes in the view, which
-        // is the whole screen. So the root is moved by the safe area's insets,
-        // and every node with it — VoiceOver's hit test too.
-        let insets = view.window.safe_area();
-        let offset = (insets.left as f64, insets.top as f64);
+        // blitz-shell's viewport is the whole window, as the adapter's view
+        // is, so the tree's bounds are the view's as they are.
         let mut built = None;
         let events = adapter.update_if_active(|| {
-            let mut tree = doc.build_accessibility_tree();
-            let root = tree.tree.as_ref().map(|t| t.root);
-            if let Some((_, node)) = tree.nodes.iter_mut().find(|(id, _)| Some(*id) == root) {
-                node.set_transform(accesskit::Affine::translate(offset));
-            }
+            let tree = doc.build_accessibility_tree();
             built = Some(tree.nodes.len());
             tree
         });
@@ -160,8 +152,8 @@ impl App {
         let Some(view) = self.blitz.windows.get(&id) else {
             return;
         };
-        // A click as a hand would make it, placed inside the safe area:
-        // blitz-shell's, as BlitzApplication carries one out.
+        // A click as a hand would make it, as BlitzApplication carries one
+        // out.
         let events = view.click_events(NodeId::from_u64(request.target_node.0));
         for e in events {
             self.window_event(event_loop, id, e);

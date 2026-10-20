@@ -33,7 +33,7 @@ use selectors::{Element, matching::QuirksMode};
 use smallvec::SmallVec;
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, Bound, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -1269,11 +1269,17 @@ impl BaseDocument {
         let element = &mut self.nodes[node_id].element_data_mut().unwrap();
         element.special_data = SpecialElementData::Stylesheet(stylesheet.clone());
 
-        // TODO: Nodes could potentially get reused so ordering by node_id might be wrong.
+        // Before the first sheet whose node follows this one in the document.
+        // Not by node id: a new node takes a dropped node's slot, and its id
+        // then sorts after nodes made later.
+        let position = self.tree_position(node_id);
         let insertion_point = self
             .nodes_to_stylesheet
-            .range((Bound::Excluded(node_id), Bound::Unbounded))
-            .next()
+            .iter()
+            .filter(|(id, _)| **id != node_id && self.nodes.get(**id).is_some())
+            .map(|(id, sheet)| (self.tree_position(*id), sheet))
+            .filter(|(other, _)| *other > position)
+            .min_by(|(a, _), (b, _)| a.cmp(b))
             .map(|(_, sheet)| sheet);
 
         if let Some(insertion_point) = insertion_point {
@@ -1286,6 +1292,23 @@ impl BaseDocument {
             self.stylist
                 .append_stylesheet(stylesheet, &self.guard.read())
         }
+    }
+
+    /// Where a node is in its tree: its index among its parent's children,
+    /// and its parent's, and so on up, read from the top. Two compare as
+    /// the nodes do in document order.
+    fn tree_position(&self, mut node_id: NodeId) -> Vec<usize> {
+        let mut position = Vec::new();
+        while let Some(parent) = self.nodes.get(node_id).and_then(|node| node.parent) {
+            let Some(parent_node) = self.nodes.get(parent) else {
+                break;
+            };
+            let index = parent_node.children.iter().position(|id| *id == node_id);
+            position.push(index.unwrap_or(0));
+            node_id = parent;
+        }
+        position.reverse();
+        position
     }
 
     pub fn handle_messages(&mut self) {
