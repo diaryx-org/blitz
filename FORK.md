@@ -28,6 +28,9 @@ debug_timer = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # The winit backends, patched (patches/*/PATCH.md), for the platforms built:
 winit-appkit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 winit-uikit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+# The renderer, patched (patches/anyrender_vello/PATCH.md), with the `vello`
+# feature: alone, as its manifest takes its siblings from crates.io
+anyrender_vello = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 ```
 
 Patch **every** crate of this repository that is in the graph, not only the
@@ -44,8 +47,9 @@ older line (0.7) than the published 0.8 alphas, which stay crates.io's.
   its author kept, and a note in its message of what the backport changed.
 - **A new Blitz release** that dioxus-native moves to: `leaf` is rebased onto
   its tag. A change upstream now has is dropped then. The winit backends in
-  `patches/` move with it, to the winit that release pins; each goes when
-  its fix is in that winit.
+  `patches/` move with it, to the winit that release pins, and
+  `anyrender_vello` to the anyrender it takes; each goes when its fix is in
+  that release.
 - **A winit fix** goes upstream to winit, not Blitz (each `PATCH.md` says
   where it stands).
 - Commits follow the diaryx-org rules: Conventional Commits, a
@@ -91,3 +95,8 @@ And the winit backends dioxus-native pins, patched, in `patches/`:
 `winit-appkit` (the Mac's text input client answers about the text round the
 caret: accents, the emoji picker, dictation) and `winit-uikit` (the UIScene
 lifecycle iOS 27 requires). They came from leaf's `patches/`.
+
+And `anyrender_vello`, from Diaryx's app: a default frame latency of 2, not
+1, so that on Metal a frame does not wait for the one on screen before it can
+draw (about 22 ms a frame on an iPhone, before). dioxus-native gives no way
+to set it.

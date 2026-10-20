@@ -91,7 +91,11 @@ impl VelloRendererOptions {
             antialiasing_method: AaConfig::Msaa16,
             composite_alpha_mode: anyrender::CompositeAlphaMode::Auto,
             pipeline_cache: None,
-            desired_maximum_frame_latency: 1,
+            // PATCH(diaryx): 2, not 1. On Metal a latency of 1 gives the
+            // layer two drawables, and acquiring one waited for the frame on
+            // screen to be let go: about 22 ms a frame on an iPhone, scrolling
+            // at 27 frames a second on a 60 Hz display.
+            desired_maximum_frame_latency: 2,
         }
     }
 
