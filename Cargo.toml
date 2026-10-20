@@ -27,7 +27,9 @@ members = [
     "examples/wgpu_texture",
     "examples/wasm_hello",
 ]
-exclude = ["sites"]
+# The winit backends dioxus-native pins, patched (patches/*/PATCH.md): taken
+# by consumers through [patch.crates-io], not built here.
+exclude = ["sites", "patches", "examples/ios-a11y"]
 resolver = "2"
 
 [workspace.package]

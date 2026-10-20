@@ -7,7 +7,8 @@ carries what we need now.
 
 ## Branches
 
-- **`leaf`**: the branch we build against. It starts at the release tag
+- **`leaf`**: the branch every org app builds its Blitz stack from, leaf's
+  and others' (the name is where it began). It starts at the release tag
   dioxus-native pins exactly (`v0.3.0-beta.4` for dioxus-native
   0.8.0-alpha.3), so its crates keep that version and can replace the
   published ones through `[patch.crates-io]`; our changes are commits on top.
@@ -24,6 +25,9 @@ blitz-paint = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 stylo_taffy = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 debug_timer = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # and blitz-net, blitz-html, accesskit_xplat where the graph has them
+# The winit backends, patched (patches/*/PATCH.md), for the platforms built:
+winit-appkit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+winit-uikit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 ```
 
 Patch **every** crate of this repository that is in the graph, not only the
@@ -39,18 +43,37 @@ older line (0.7) than the published 0.8 alphas, which stay crates.io's.
 - **An upstream fix** we want before its release is cherry-picked with `-x`,
   its author kept, and a note in its message of what the backport changed.
 - **A new Blitz release** that dioxus-native moves to: `leaf` is rebased onto
-  its tag. A change upstream now has is dropped then.
+  its tag. A change upstream now has is dropped then. The winit backends in
+  `patches/` move with it, to the winit that release pins; each goes when
+  its fix is in that winit.
+- **A winit fix** goes upstream to winit, not Blitz (each `PATCH.md` says
+  where it stands).
 - Commits follow the diaryx-org rules: Conventional Commits, a
   `Behavioural-change:` trailer where a caller would notice.
 
 ## What is on `leaf`
 
-Accessibility, found in leaf's Mac app and an iOS spike
-(`spikes/blitz-ios-a11y` in leaf), where with these VoiceOver and agents read
-and press a page:
+Accessibility, found in leaf's Mac app and an iOS spike (now
+`examples/ios-a11y`), where with these VoiceOver and agents read and press a
+page:
 
 - Bounds on every AccessKit node (DioxusLabs/blitz#842, cherry-picked), and the
   viewport's for the document node.
 - A page's text as static text (a `Label`, its text the value); elements
   with no semantics as `GenericContainer`.
 - The click action on buttons, links, menu items and choices.
+- ARIA's states: checked and pressed as toggled, a value and its range,
+  modal, orientation; the roles switch and separator.
+- An action request carried out: a click as a click, through the window's
+  own events (`View::click_events`, `View::accessibility_action_events`).
+
+Events and layout, found by diaryx-org/unit's gallery:
+
+- A press focuses what it lands on when that can be focused, and a click goes
+  to the nearest element the press and the release share.
+- A node removed under `display: none` is forgotten by its layout parent.
+
+And the winit backends dioxus-native pins, patched, in `patches/`:
+`winit-appkit` (the Mac's text input client answers about the text round the
+caret: accents, the emoji picker, dictation) and `winit-uikit` (the UIScene
+lifecycle iOS 27 requires). They came from leaf's `patches/`.

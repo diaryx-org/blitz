@@ -524,6 +524,61 @@ impl<Rend: WindowRenderer> View<Rend> {
         self.accessibility.update_tree(&inner);
     }
 
+    /// The window events that click `node` as a hand would: the pointer
+    /// moved to the middle of its box, pressed and released there. Fed to
+    /// [`View::handle_winit_event`], or through an embedder's own handling
+    /// of window events, the node acts on them exactly as on a real click.
+    /// Empty for a node with no box.
+    pub fn click_events(&self, node: blitz_traits::node_id::NodeId) -> Vec<WindowEvent> {
+        let Some(rect) = self.doc.inner().get_client_bounding_rect(node) else {
+            return Vec::new();
+        };
+        // Window events are in the window's surface, and the page is laid out
+        // inside its safe area.
+        let scale = self.window.scale_factor();
+        let insets = self.safe_area_insets;
+        let at = PhysicalPosition::new(
+            (rect.x + rect.width / 2.0) * scale + insets.left as f64,
+            (rect.y + rect.height / 2.0) * scale + insets.top as f64,
+        );
+        let button = |state| WindowEvent::PointerButton {
+            device_id: None,
+            state,
+            position: at,
+            primary: true,
+            button: ButtonSource::Mouse(MouseButton::Left),
+            is_macos_activation_click: false,
+        };
+        vec![
+            WindowEvent::PointerMoved {
+                device_id: None,
+                position: at,
+                primary: true,
+                source: winit::event::PointerSource::Mouse,
+            },
+            button(ElementState::Pressed),
+            button(ElementState::Released),
+        ]
+    }
+
+    /// The window events that carry out what assistive tech asks of a node —
+    /// VoiceOver's activate, an agent's `AXPress` — where it is something a
+    /// pointer does: a click, as [`View::click_events`]. Empty for any other
+    /// action. [`crate::BlitzApplication`] carries them out itself; an
+    /// embedder with its own event loop feeds them through its own handling.
+    #[cfg(feature = "accessibility")]
+    pub fn accessibility_action_events(
+        &self,
+        request: &accesskit::ActionRequest,
+    ) -> Vec<WindowEvent> {
+        match request.action {
+            accesskit::Action::Click => self.click_events(blitz_traits::node_id::NodeId::from_u64(
+                request.target_node.0,
+            )),
+            _ => Vec::new(),
+        }
+    }
+
     #[cfg(target_arch = "wasm32")]
     const RESIZE_DEBOUNCE_MS: u32 = 100;
 
