@@ -142,11 +142,14 @@ impl PanState {
                     0.0
                 };
 
+                // PATCH(diaryx): the finger's own speed, not twice it: the
+                // fling decays as UIKit's does (`resolve_scroll_animation`),
+                // and goes as far as a phone's scroll view would.
                 return Some(FlingState {
                     target: self.target,
                     last_seen_time: time_ms as f64,
-                    x_velocity: x_velocity as f64 * 2.0,
-                    y_velocity: y_velocity as f64 * 2.0,
+                    x_velocity: x_velocity as f64,
+                    y_velocity: y_velocity as f64,
                 });
             }
         }
