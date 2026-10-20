@@ -161,10 +161,17 @@ impl StackingContext {
             }
         };
 
+        // PATCH(diaryx): `children` is rebuilt only when the document resolves,
+        // so between a mutation and the next layout it can name a node already
+        // removed, and a hit test then would index a stale key. Skip those.
+        let mut live = self
+            .children
+            .iter()
+            .filter(|c| tree.get(c.node_id).is_some());
         let mut area = Rect::ZERO;
-        if let Some((first, rest)) = self.children.split_first() {
+        if let Some(first) = live.next() {
             area = child_rect(first);
-            for child in rest {
+            for child in live {
                 let pos = child_rect(child);
                 area.left = area.left.min(pos.left);
                 area.top = area.top.min(pos.top);
