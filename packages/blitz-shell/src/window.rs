@@ -29,15 +29,13 @@ use winit::{event::Modifiers, event::WindowEvent, keyboard::KeyCode, window::Win
 #[cfg(feature = "accessibility")]
 use crate::accessibility::AccessibilityState;
 
-// Ignore safe_area_insets on macOS because we don't want to avoid
-// drawing in the titlebar.
-#[cfg(target_os = "macos")]
+// Ignore safe_area_insets everywhere (Diaryx's patch; upstream ignores them on
+// macOS alone, so as not to avoid drawing in the titlebar): the viewport is
+// the whole window, edge to edge, and the app lays its screens out inside the
+// safe area itself, with its own ground in the margins rather than the white
+// this shell painted there.
 fn get_safe_area_insets(_window: &dyn Window) -> PhysicalInsets<u32> {
     Default::default()
-}
-#[cfg(not(target_os = "macos"))]
-fn get_safe_area_insets(window: &dyn Window) -> PhysicalInsets<u32> {
-    window.safe_area()
 }
 
 pub struct WindowConfig<Rend: WindowRenderer> {
