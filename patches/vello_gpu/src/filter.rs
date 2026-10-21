@@ -14,6 +14,7 @@ use vello_common::filter::gaussian_blur::{DecimationSizer, GaussianBlur, MAX_KER
 use vello_common::filter::offset::Offset;
 use vello_common::filter::{FilterData, PreparedFilter};
 use vello_common::filter_effects::EdgeMode;
+use vello_common::filter_effects::{Filter, FilterPrimitive};
 use vello_common::geometry::{RectU16, SizeU16};
 use vello_common::util::RetainVec;
 
@@ -35,6 +36,21 @@ const FILTER_SIZE_BYTES: usize = 48;
 const FILTER_SIZE_U32: usize = FILTER_SIZE_BYTES / 4;
 const COMPOSITE_ORIGINAL_SHIFT: u32 = 13;
 const COMPOSITE_ORIGINAL_MASK: u32 = 1 << COMPOSITE_ORIGINAL_SHIFT;
+/// PATCH(diaryx): set in the header when a color matrix follows the filter's own record.
+const HAS_COLOR_MATRIX_MASK: u32 = 1 << 14;
+/// PATCH(diaryx): the texel, counted from a filter's own record, where its color matrix begins.
+///
+/// Keep this in sync with `COLOR_MATRIX_TEXEL` in `filter.wesl`!
+const COLOR_MATRIX_TEXEL: u32 = 3;
+
+const _: () = assert!(
+    COLOR_MATRIX_TEXEL as usize * BYTES_PER_TEXEL == FILTER_SIZE_BYTES,
+    "the color matrix must start right after the filter's own record"
+);
+const _: () = assert!(
+    size_of::<GpuColorMatrix>() == 2 * FILTER_SIZE_BYTES,
+    "a color matrix takes two filter records"
+);
 
 const _: () = assert!(
     size_of::<GpuFilterData>() == FILTER_SIZE_BYTES,
@@ -62,6 +78,8 @@ pub(crate) mod filter_type {
     pub(crate) const FLOOD: u32 = 1;
     pub(crate) const GAUSSIAN_BLUR: u32 = 2;
     pub(crate) const DROP_SHADOW: u32 = 3;
+    /// PATCH(diaryx): no filter of its own, only a color matrix.
+    pub(crate) const COLOR_MATRIX: u32 = 4;
 }
 
 pub(crate) mod edge_mode {
@@ -81,6 +99,8 @@ pub(crate) mod pass_kind {
     pub(crate) const UPSCALE: u32 = 6;
     pub(crate) const COMPOSITE_DROP_SHADOW: u32 = 7;
     pub(crate) const COLORIZE: u32 = 8;
+    /// PATCH(diaryx): apply the filter's color matrix.
+    pub(crate) const COLOR_MATRIX: u32 = 9;
 }
 
 pub(crate) fn edge_mode_to_gpu(mode: EdgeMode) -> u32 {
@@ -310,6 +330,46 @@ impl From<&DropShadow> for GpuDropShadow {
     }
 }
 
+/// PATCH(diaryx): a 4x5 color matrix as five columns, the factors of R, G, B and A and then the
+/// offsets, each giving the R, G, B and A outputs. Stored in the two records after a filter's own.
+#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy, PartialEq, Zeroable, Pod)]
+pub(crate) struct GpuColorMatrix {
+    pub columns: [[f32; 4]; 5],
+    pub _padding: [u32; 4],
+}
+
+impl GpuColorMatrix {
+    /// From a row-major 4x5 matrix, as `feColorMatrix` gives one.
+    fn new(matrix: &[f32; 20]) -> Self {
+        Self {
+            columns: core::array::from_fn(|column| {
+                core::array::from_fn(|row| matrix[row * 5 + column])
+            }),
+            _padding: [0; 4],
+        }
+    }
+
+    fn records(self) -> [GpuFilterData; 2] {
+        bytemuck::cast(self)
+    }
+}
+
+/// PATCH(diaryx): the matrix that applies `first`, then `second`, both row-major 4x5. The
+/// clamp between them that `feColorMatrix` would apply is skipped.
+fn compose_color_matrices(first: &[f32; 20], second: &[f32; 20]) -> [f32; 20] {
+    core::array::from_fn(|index| {
+        let (row, column) = (index / 5, index % 5);
+        let mut value: f32 = (0..4)
+            .map(|k| second[row * 5 + k] * first[k * 5 + column])
+            .sum();
+        if column == 4 {
+            value += second[row * 5 + 4];
+        }
+        value
+    })
+}
+
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, Zeroable, Pod)]
 pub(crate) struct GpuFilterData {
@@ -334,6 +394,11 @@ impl GpuFilterData {
 
     pub(crate) fn composite_original(&self) -> bool {
         self.data[0] & COMPOSITE_ORIGINAL_MASK != 0
+    }
+
+    /// PATCH(diaryx): whether a color matrix follows the filter's own record.
+    pub(crate) fn has_color_matrix(&self) -> bool {
+        self.data[0] & HAS_COLOR_MATRIX_MASK != 0
     }
 
     pub(crate) fn needs_copy_pass(&self) -> bool {
@@ -444,6 +509,8 @@ impl FilterPassPlan {
                 filter_type::GAUSSIAN_BLUR => {
                     builder.emit_blur_sequence(filter.gpu_filter.n_decimations());
                 }
+                // PATCH(diaryx): only the color matrix, below.
+                filter_type::COLOR_MATRIX => {}
                 filter_type::DROP_SHADOW => {
                     builder.emit(pass_kind::OFFSET);
                     builder.emit_blur_sequence(filter.gpu_filter.n_decimations());
@@ -454,6 +521,10 @@ impl FilterPassPlan {
                     }
                 }
                 _ => unreachable!("unsupported filter type was encoded"),
+            }
+
+            if filter.gpu_filter.has_color_matrix() {
+                builder.emit(pass_kind::COLOR_MATRIX);
             }
 
             builder.ensure_result_in_original();
@@ -622,11 +693,53 @@ impl FilterContext {
         self.filters.clear();
     }
 
+    /// PATCH(diaryx): a filter is one primitive `vello_gpu` draws (an offset, a flood, a blur or a
+    /// drop shadow), then any color matrices, folded into one and applied last. Either part may
+    /// be missing. A primitive of any other kind, or a second one of those, is skipped.
     pub(crate) fn push(&mut self, filter_data: &FilterData) -> PreparedGpuFilter {
         let data_offset = self.total_texels();
-        let prepared = PreparedFilter::new(&filter_data.filter, &filter_data.transform);
-        let data = GpuFilterData::from(&prepared);
+
+        let mut lead = None;
+        let mut matrix: Option<[f32; 20]> = None;
+        for primitive in &filter_data.filter.graph.primitives {
+            match primitive {
+                FilterPrimitive::ColorMatrix { matrix: next } => {
+                    matrix = Some(match &matrix {
+                        Some(first) => compose_color_matrices(first, next),
+                        None => *next,
+                    });
+                }
+                FilterPrimitive::Offset { .. }
+                | FilterPrimitive::Flood { .. }
+                | FilterPrimitive::GaussianBlur { .. }
+                | FilterPrimitive::DropShadow { .. }
+                | FilterPrimitive::DropShadowOnly { .. }
+                    if lead.is_none() && matrix.is_none() =>
+                {
+                    lead = Some(primitive.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let mut data = match lead {
+            Some(lead) => GpuFilterData::from(&PreparedFilter::new(
+                &Filter::from_primitive(lead),
+                &filter_data.transform,
+            )),
+            None => {
+                let mut data = GpuFilterData::zeroed();
+                data.data[0] = pack_header(filter_type::COLOR_MATRIX);
+                data
+            }
+        };
+        if matrix.is_some() {
+            data.data[0] |= HAS_COLOR_MATRIX_MASK;
+        }
         self.filters.push(data);
+        if let Some(matrix) = matrix {
+            self.filters.extend(GpuColorMatrix::new(&matrix).records());
+        }
 
         PreparedGpuFilter { data_offset, data }
     }
@@ -911,5 +1024,122 @@ mod tests {
         let (kernel, size) = compute_gaussian_kernel(2.0);
         assert_eq!(size, 13);
         check_linear_kernel(&kernel, size, 3);
+    }
+
+    // PATCH(diaryx): color matrices.
+
+    const IDENTITY: [f32; 20] = [
+        1.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, 1.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 1.0, 0.0,
+    ];
+
+    /// Alpha scaled by 18 and lowered by 7: the threshold that makes blurred shapes goo.
+    const GOO: [f32; 20] = [
+        1.0, 0.0, 0.0, 0.0, 0.0, //
+        0.0, 1.0, 0.0, 0.0, 0.0, //
+        0.0, 0.0, 1.0, 0.0, 0.0, //
+        0.0, 0.0, 0.0, 18.0, -7.0,
+    ];
+
+    fn filter_data(primitives: impl IntoIterator<Item = FilterPrimitive>) -> FilterData {
+        let mut graph = vello_common::filter_effects::FilterGraph::new();
+        let mut output = None;
+        for primitive in primitives {
+            output = Some(graph.add(primitive, None));
+        }
+        graph.set_output(output.unwrap());
+        let filter = Filter {
+            graph: alloc::sync::Arc::new(graph),
+        };
+        FilterData::new(filter, vello_common::kurbo::Affine::IDENTITY)
+    }
+
+    fn blur_primitive() -> FilterPrimitive {
+        FilterPrimitive::GaussianBlur {
+            std_deviation: 8.0,
+            edge_mode: EdgeMode::None,
+        }
+    }
+
+    #[test]
+    fn composing_with_the_identity_changes_nothing() {
+        assert_eq!(compose_color_matrices(&IDENTITY, &GOO), GOO);
+        assert_eq!(compose_color_matrices(&GOO, &IDENTITY), GOO);
+    }
+
+    #[test]
+    fn composing_applies_the_first_matrix_first() {
+        // Alpha doubled, then raised by 0.25: 2a + 0.25, not 2(a + 0.25).
+        let mut double = IDENTITY;
+        double[18] = 2.0;
+        let mut raise = IDENTITY;
+        raise[19] = 0.25;
+        let composed = compose_color_matrices(&double, &raise);
+        assert_eq!((composed[18], composed[19]), (2.0, 0.25));
+    }
+
+    #[test]
+    fn a_color_matrix_is_stored_as_columns_after_the_filter() {
+        let mut context = FilterContext::default();
+        let prepared = context.push(&filter_data([
+            blur_primitive(),
+            FilterPrimitive::ColorMatrix { matrix: GOO },
+        ]));
+
+        assert_eq!(prepared.data.filter_type(), filter_type::GAUSSIAN_BLUR);
+        assert!(prepared.data.has_color_matrix());
+        // The blur's own record, then the matrix's two.
+        assert_eq!(context.filters.len(), 3);
+        let columns: [[f32; 4]; 5] =
+            bytemuck::cast_slice::<GpuFilterData, [f32; 4]>(&context.filters[1..])[..5]
+                .try_into()
+                .unwrap();
+        assert_eq!(columns[3], [0.0, 0.0, 0.0, 18.0]);
+        assert_eq!(columns[4], [0.0, 0.0, 0.0, -7.0]);
+        assert_eq!(context.total_texels(), 3 * GpuFilterData::SIZE_TEXELS);
+    }
+
+    #[test]
+    fn a_color_matrix_alone_has_no_filter_of_its_own() {
+        let mut context = FilterContext::default();
+        let prepared = context.push(&filter_data([FilterPrimitive::ColorMatrix { matrix: GOO }]));
+
+        assert_eq!(prepared.data.filter_type(), filter_type::COLOR_MATRIX);
+        assert!(prepared.data.has_color_matrix());
+
+        let mut plan = FilterPassPlan::default();
+        plan.init([filter_op(prepared.data, 0)], SizeU16::new(64));
+        assert_eq!(
+            step_layout(&plan),
+            alloc::vec![
+                alloc::vec![(0, pass_kind::COLOR_MATRIX)],
+                alloc::vec![(0, pass_kind::COPY)],
+            ]
+        );
+    }
+
+    #[test]
+    fn a_color_matrix_runs_after_the_blur() {
+        let mut context = FilterContext::default();
+        let prepared = context.push(&filter_data([
+            blur_primitive(),
+            FilterPrimitive::ColorMatrix { matrix: GOO },
+        ]));
+
+        let mut plan = FilterPassPlan::default();
+        plan.init([filter_op(prepared.data, 0)], SizeU16::new(64));
+        let kinds: Vec<u32> = step_layout(&plan)
+            .into_iter()
+            .map(|step| step[0].1)
+            .collect();
+        let matrix_at = kinds
+            .iter()
+            .position(|&kind| kind == pass_kind::COLOR_MATRIX);
+        let last_blur_pass = kinds
+            .iter()
+            .rposition(|&kind| matches!(kind, pass_kind::BLUR_V | pass_kind::UPSCALE));
+        assert!(matrix_at > last_blur_pass, "{kinds:?}");
     }
 }

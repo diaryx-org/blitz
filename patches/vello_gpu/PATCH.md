@@ -72,7 +72,32 @@ shows them blurred through its rounded corners, its own text sharp on top.
   nearest ancestor with a filter, opacity, a mask or a blend mode; anyrender
   pushes a layer for exactly those, so the two agree.
 
+## Color matrices
+
+vello_gpu drew no pixel-local filter: CSS's `brightness()`, `contrast()`,
+`saturate()`, `grayscale()`, `sepia()`, `hue-rotate()`, `invert()` and
+`opacity()`, all color matrices, drew nothing, and a filter of more than one
+step panicked in vello_common ("Multi-primitive filter graphs are not yet
+supported"). The second matters for more than color: a blur followed by a
+matrix that sharpens alpha is how blurred shapes merge into one smooth
+shape (the "gooey" effect), and how unit's liquid themes join their pieces.
+
+`FilterContext::push` (`src/filter.rs`) now takes a filter as one primitive
+it draws (an offset, a flood, a blur or a drop shadow), then any color
+matrices, folded into one. The matrix is stored as five columns in the two
+records after the filter's own, flagged in its header, and
+`FilterPassPlan::init` runs a `COLOR_MATRIX` pass after the filter's other
+passes; the pass is in `patches/vello_gpu_shaders`. A filter of a matrix
+alone has a type of its own with no other passes. Folding skips the clamp
+`feColorMatrix` applies between two matrices. A primitive of any other kind,
+or a second drawn one, is skipped rather than panicking. Five tests; the
+crate's 131 unit tests pass.
+
+Checked in unit's gallery: `brightness(0.6)` darkens, and two blurred circles
+under `contrast(20)` on white join into one shape with a neck as one moves
+away, animated, and part.
+
 ## When it goes
 
-When vello_gpu draws backdrop filters and anyrender_vello_hybrid passes them
-on, and dioxus-native moves to those releases. Not reported upstream yet.
+When vello_gpu draws backdrop filters and color matrices and
+anyrender_vello_hybrid passes them on, and dioxus-native moves to those releases. Not reported upstream yet.
