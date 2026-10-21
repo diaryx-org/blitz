@@ -31,10 +31,11 @@ winit-uikit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # The renderer, patched (patches/anyrender_vello/PATCH.md), with the `vello`
 # feature: alone, as its manifest takes its siblings from crates.io
 anyrender_vello = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
-# Or, with the `vello-hybrid` feature, the two that draw emoji with it
-# (patches/anyrender_vello_hybrid/PATCH.md, patches/glifo/PATCH.md)
+# Or, with the `vello-hybrid` feature, the three that draw emoji and
+# backdrop filters with it (patches/*/PATCH.md)
 anyrender_vello_hybrid = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 glifo = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+vello_gpu = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 ```
 
 Patch **every** crate of this repository that is in the graph, not only the
@@ -52,8 +53,8 @@ older line (0.7) than the published 0.8 alphas, which stay crates.io's.
 - **A new Blitz release** that dioxus-native moves to: `leaf` is rebased onto
   its tag. A change upstream now has is dropped then. The winit backends in
   `patches/` move with it, to the winit that release pins, and
-  `anyrender_vello`, `anyrender_vello_hybrid` and `glifo` to the anyrender
-  and glifo it takes; each goes when its fix is in that release.
+  `anyrender_vello`, `anyrender_vello_hybrid`, `glifo` and `vello_gpu` to
+  the anyrender and vello it takes; each goes when its fix is in that release.
 - **A winit fix** goes upstream to winit, not Blitz (each `PATCH.md` says
   where it stands).
 - Commits follow the diaryx-org rules: Conventional Commits, a
@@ -110,3 +111,8 @@ draws a bitmap glyph, which every Apple Color Emoji is: from glifo's atlas,
 with `png` on, at any size and in synthesised italic. Before, an emoji drew
 as nothing or panicked, and the org's apps built with classic `vello` for
 it.
+
+And `vello_gpu`, with `anyrender_vello_hybrid`, so that `vello-hybrid` draws
+CSS `backdrop-filter`: what is beneath an element, filtered, through its
+border box (`patches/vello_gpu/PATCH.md`). `blitz-paint` clips a backdrop to
+the rounded border box rather than its bounding rectangle.
