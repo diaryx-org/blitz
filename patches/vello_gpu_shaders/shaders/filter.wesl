@@ -42,6 +42,26 @@ const PASS_BLUR_V: u32 = 5u;
 const PASS_UPSCALE: u32 = 6u;
 const PASS_COMPOSITE_DROP_SHADOW: u32 = 7u;
 const PASS_COLORIZE: u32 = 8u;
+// PATCH(diaryx): a 4x5 color matrix, after any other passes of the filter.
+const PASS_COLOR_MATRIX: u32 = 9u;
+
+// PATCH(diaryx): the texel after a filter's own record where its color matrix begins, as five
+// columns: the factors of R, G, B and A, then the offsets. Keep in sync with
+// `COLOR_MATRIX_TEXEL` in vello_gpu/src/filter.rs.
+const COLOR_MATRIX_TEXEL: u32 = 3u;
+
+/// PATCH(diaryx): apply a filter's color matrix to a premultiplied pixel, as `feColorMatrix`
+/// does: to the unpremultiplied color, clamped to [0, 1].
+fn apply_color_matrix(texel_offset: u32, color: vec4<f32>) -> vec4<f32> {
+    let rgb = select(vec3<f32>(0.0), color.rgb / color.a, color.a > 0.0);
+    var out = bitcast<vec4<f32>>(load_filter_texel(texel_offset, COLOR_MATRIX_TEXEL + 4u));
+    out += bitcast<vec4<f32>>(load_filter_texel(texel_offset, COLOR_MATRIX_TEXEL)) * rgb.r;
+    out += bitcast<vec4<f32>>(load_filter_texel(texel_offset, COLOR_MATRIX_TEXEL + 1u)) * rgb.g;
+    out += bitcast<vec4<f32>>(load_filter_texel(texel_offset, COLOR_MATRIX_TEXEL + 2u)) * rgb.b;
+    out += bitcast<vec4<f32>>(load_filter_texel(texel_offset, COLOR_MATRIX_TEXEL + 3u)) * color.a;
+    out = clamp(out, vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec4<f32>(out.rgb * out.a, out.a);
+}
 
 // Keep in sync with FILTER_ATLAS_PADDING in vello_gpu/src/filter.rs.
 const FILTER_ATLAS_PADDING: u32 = 6u;
@@ -269,6 +289,9 @@ fn fs_main(
                 rel_coord,
                 filter_texel2,
             );
+        }
+        case PASS_COLOR_MATRIX: {
+            return apply_color_matrix(filter_data_offset, sample_source(source_origin, rel_coord));
         }
         // Shouldn't be reached.
         default: {
