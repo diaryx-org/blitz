@@ -10,11 +10,19 @@ pub(crate) fn convert_filter(filter: Arc<Filter>) -> Option<vello_common::filter
     }
 
     // Vello Hybrid only supports single-node filters at the moment
-    let node = &filter.nodes()[0];
-    let primitive = convert_filter_effect(&node.effect)?;
-    Some(vello_common::filter_effects::Filter::from_primitive(
-        primitive,
-    ))
+    // PATCH(diaryx): every step of the filter, in order, not the first alone; vello_gpu draws a
+    // first step and the color matrices after it. A step it cannot draw is skipped.
+    let mut graph = vello_common::filter_effects::FilterGraph::new();
+    let mut output = None;
+    for node in nodes {
+        if let Some(primitive) = convert_filter_effect(&node.effect) {
+            output = Some(graph.add(primitive, None));
+        }
+    }
+    graph.set_output(output?);
+    Some(vello_common::filter_effects::Filter {
+        graph: std::sync::Arc::new(graph),
+    })
 }
 
 pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimitive> {
@@ -35,8 +43,9 @@ pub(crate) fn convert_filter_effect(effect: &FilterEffect) -> Option<FilterPrimi
             dx: offset.x as f32,
             dy: offset.y as f32,
         },
-        FilterEffect::ColorMatrix(_matrix) => return None, //FilterPrimitive::ColorMatrix { matrix: matrix.0 },
-        FilterEffect::Blend(_mode) => return None,         //FilterPrimitive::Blend { mode: *mode },
+        // PATCH(diaryx): vello_gpu draws a color matrix.
+        FilterEffect::ColorMatrix(matrix) => FilterPrimitive::ColorMatrix { matrix: matrix.0 },
+        FilterEffect::Blend(_mode) => return None, //FilterPrimitive::Blend { mode: *mode },
         FilterEffect::ComponentTransfer(_component_transfer_filter) => return None,
         FilterEffect::Composite(_composite_operator) => return None,
         FilterEffect::Morphology(_morphology_filter) => return None,
