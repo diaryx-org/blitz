@@ -493,8 +493,26 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                 // Save it so that the mask can be drawn untransformed by scroll offsets.
                 let unscrolled_transform = cx.transform;
 
-                let filter = convert_filters(&effects.filter.0).map(Arc::new);
-                let backdrop_filter = convert_filters(&effects.backdrop_filter.0).map(Arc::new);
+                let parent_styles = node
+                    .parent
+                    .and_then(|parent| self.dom.get_node(parent))
+                    .and_then(|parent| parent.primary_styles());
+                let filter = convert_filters(
+                    &effects.filter.0,
+                    &styles,
+                    parent_styles.as_deref().map(|styles| &**styles),
+                    "blitz-filter",
+                    self.dom,
+                )
+                .map(Arc::new);
+                let backdrop_filter = convert_filters(
+                    &effects.backdrop_filter.0,
+                    &styles,
+                    parent_styles.as_deref().map(|styles| &**styles),
+                    "blitz-backdrop-filter",
+                    self.dom,
+                )
+                .map(Arc::new);
 
                 // Adjust effect layer clip by filter expansion area
                 //

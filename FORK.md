@@ -122,3 +122,9 @@ And `vello_gpu_shaders`, with `vello_gpu` and `anyrender_vello_hybrid`, so
 that `vello-hybrid` draws color matrices (CSS's `brightness()`, `contrast()`
 and the rest) and a filter of a blur and a matrix after it: blurred shapes
 that merge, the "gooey" effect.
+
+And `filter` and `backdrop-filter` naming an SVG `<filter>` in the page,
+through `--blitz-filter: url(#id)` and `--blitz-backdrop-filter: url(#id)`
+beside the standard `url(#id)`, which Stylo's Servo build cannot parse
+(`blitz-paint/src/filters.rs`). Its `feGaussianBlur`, `feColorMatrix` and
+`feOffset` are read as one chain, enough for blurred shapes that merge.
