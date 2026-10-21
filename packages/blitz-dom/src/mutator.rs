@@ -1438,6 +1438,50 @@ mod test {
     }
 
     #[test]
+    fn a_subtree_with_anonymous_blocks_is_dropped_whole() {
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        doc.add_user_agent_stylesheet(crate::document::UserAgentStylesheet::parse(
+            "html, body, div { display: block; }",
+        ));
+        let root_id = doc.root_node().id;
+        let mut m = doc.mutate();
+        let html = m.create_element(qual_name!("html"), vec![]);
+        // A sheet holding text beside a block: the text is laid out in
+        // anonymous blocks the sheet owns.
+        let sheet = m.create_element(qual_name!("div"), vec![]);
+        let row = m.create_element(qual_name!("div"), vec![]);
+        let before = m.create_element(qual_name!("div"), vec![]);
+        let label = m.create_text_node("a button");
+        m.append_children(before, &[label]);
+        let inside = m.create_text_node("a row");
+        let after = m.create_text_node("after");
+        m.append_children(row, &[inside]);
+        m.append_children(sheet, &[before, row, after]);
+        m.append_children(html, &[sheet]);
+        m.append_children(root_id, &[html]);
+        drop(m);
+        // An inline-block beside a block: a box of its own, laid out in an
+        // anonymous block the sheet owns.
+        doc.mutate()
+            .set_style_property(before, "display", "inline-block");
+        doc.resolve(0.0);
+        assert!(
+            !doc.nodes[sheet].anonymous_blocks.is_empty(),
+            "the case this tests: text laid out in anonymous blocks"
+        );
+
+        // Dropped root first: its children follow a parent already gone.
+        doc.mutate().remove_and_drop_node(sheet);
+        doc.resolve(0.0);
+        for id in [sheet, before, label, row, inside, after] {
+            assert!(!doc.nodes.contains_key(id));
+        }
+    }
+
+    #[test]
     fn mutator_remove_disabled() {
         let mut document = BaseDocument::new(DocumentConfig::default());
         let id = document.create_node(NodeData::Element(Box::new(ElementData::new(

@@ -899,8 +899,20 @@ impl BaseDocument {
     /// and one under `display: none` is not: a child removed meanwhile (a
     /// hidden dialog whose content changed) stayed in its list, and showing
     /// the container laid out a node no longer in the slab.
+    ///
+    /// A subtree is dropped root first, so a node whose parent has already
+    /// left the slab is going with everything round it, its layout parent
+    /// included: an anonymous block of that parent's is still in the slab
+    /// until the parent's teardown ends, but marking it dirty would walk up
+    /// to the parent that is gone.
     fn forget_layout_child(&mut self, node_id: NodeId) {
-        let Some(parent_id) = self.nodes.get(node_id).and_then(|n| n.layout_parent.get()) else {
+        let Some(node) = self.nodes.get(node_id) else {
+            return;
+        };
+        if node.parent.is_some_and(|p| !self.nodes.contains_key(p)) {
+            return;
+        }
+        let Some(parent_id) = node.layout_parent.get() else {
             return;
         };
         if parent_id == node_id {
