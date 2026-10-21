@@ -939,3 +939,80 @@ fn blend_is_constrained_to_parent_clip_bbox() {
     // This must not panic.
     let _ = crate::blend::GpuBlendInstance::new(blend, None, SizeU16::new(64));
 }
+
+// PATCH(diaryx): backdrop filters.
+
+fn backdrop_case(nested: bool, clip: Option<Rect>) -> SceneCase {
+    let mut case = SceneCase::new(32, 32);
+    case.draw(Rect::new(0.0, 0.0, 32.0, 32.0), 1.0);
+    let backdrop = |case: &mut SceneCase| {
+        let clip = clip.map(|rect| vello_common::kurbo::Shape::to_path(&rect, 0.1));
+        case.scene.push_layer_with_backdrop(
+            clip.as_ref(),
+            None,
+            None,
+            None,
+            None,
+            Some(offset_filter()),
+        );
+        case.draw(Rect::new(8.0, 8.0, 16.0, 16.0), 0.5);
+        case.scene.pop_layer();
+    };
+    if nested {
+        case.layer(backdrop);
+    } else {
+        backdrop(&mut case);
+    }
+    case
+}
+
+fn filter_passes(scheduled: &ScheduledCase) -> usize {
+    scheduled
+        .views()
+        .iter()
+        .map(|round| round.filter_passes.iter().sum::<usize>())
+        .sum()
+}
+
+#[test]
+fn backdrop_at_the_root_renders_the_root_into_a_layer() {
+    let case = backdrop_case(false, Some(Rect::new(4.0, 4.0, 20.0, 20.0)));
+    assert!(case.scene.recorder.root_is_blend_target);
+
+    let scheduled = case
+        .schedule(RootTarget::UserSurface, SizeU16::new(64), 8, true)
+        .unwrap();
+
+    // The backdrop's own filter, and the root blitted back to the surface.
+    assert_eq!(filter_passes(&scheduled), 1);
+    assert!(
+        scheduled
+            .views()
+            .iter()
+            .any(|round| round.root.has_child_layer)
+    );
+}
+
+#[test]
+fn nested_backdrop_reads_its_parent_layer() {
+    let case = backdrop_case(true, Some(Rect::new(4.0, 4.0, 20.0, 20.0)));
+    assert!(!case.scene.recorder.root_is_blend_target);
+
+    let scheduled = case
+        .schedule(RootTarget::UserSurface, SizeU16::new(64), 8, true)
+        .unwrap();
+
+    assert_eq!(filter_passes(&scheduled), 1);
+}
+
+#[test]
+fn backdrop_without_a_clip_draws_none() {
+    let case = backdrop_case(false, None);
+    assert!(!case.scene.recorder.root_is_blend_target);
+
+    let scheduled = case
+        .schedule(RootTarget::UserSurface, SizeU16::new(64), 8, true)
+        .unwrap();
+
+    assert_eq!(filter_passes(&scheduled), 0);
+}

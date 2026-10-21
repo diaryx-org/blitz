@@ -139,11 +139,12 @@ use crate::paint::PaintResolver;
 use crate::scene::RecordedDraw;
 use crate::schedule::allocate::AllocatedTextureRegion;
 use crate::target::{
-    DrawTarget, LayerTextureRegion, RootTarget, RoundBindings, TextureParity, TextureRegion,
+    DrawTarget, LayerTextureId, LayerTextureRegion, RootTarget, RoundBindings, TextureParity,
+    TextureRegion,
 };
 use crate::{IntermediateTextureError, RenderError, Scene, blend::BlendStrip};
 use alloc::vec::Vec;
-use vello_common::filter::FilterLayerPlacement;
+use vello_common::filter::{FilterData, FilterLayerPlacement};
 use vello_common::geometry::{RectU16, SizeU16};
 use vello_common::peniko::BlendMode;
 use vello_common::record::{CommandRecorder, LayerProps, Node, RecordedLayer, RecordedLayerKind};
@@ -193,6 +194,7 @@ impl Schedule {
             paint_resolver,
             texture_size,
             storage,
+            &scene.backdrops,
         );
 
         let schedule = scheduler.build()?;
@@ -289,6 +291,8 @@ struct Scheduler<'a, 'p> {
     texture_size: SizeU16,
     /// Reusable buffers populated while constructing the schedule.
     storage: &'p mut ScheduleStorage,
+    /// PATCH(diaryx): the backdrop filter of each recorded layer that has one, by layer id.
+    backdrops: &'a [(u32, FilterData)],
 }
 
 impl<'a, 'p> Scheduler<'a, 'p> {
@@ -302,6 +306,7 @@ impl<'a, 'p> Scheduler<'a, 'p> {
         paint_resolver: PaintResolver<'a>,
         texture_size: SizeU16,
         storage: &'p mut ScheduleStorage,
+        backdrops: &'a [(u32, FilterData)],
     ) -> Self {
         Self {
             recorder,
@@ -313,6 +318,7 @@ impl<'a, 'p> Scheduler<'a, 'p> {
             cursor: Cursor::new(Atlases::new(texture_size)),
             texture_size,
             storage,
+            backdrops,
         }
     }
 
@@ -364,7 +370,7 @@ impl<'a, 'p> Scheduler<'a, 'p> {
             let draw_point = rounds.build_draw(
                 &mut state,
                 &mut self.storage.buffers.draw_buffers,
-                Some(&layer),
+                Some(layer.sampled()),
                 |builder| {
                     builder.push_layer_fill(layer.sample_region, 1.0, None, self.strip_storage);
                 },
@@ -417,6 +423,12 @@ impl<'a, 'p> Scheduler<'a, 'p> {
             // Now schedule the draws.
             self.push_draws(&cmd.draws, &mut target.schedule_state, rounds);
 
+            // PATCH(diaryx): what the draws so far left beneath the child, filtered, goes under
+            // the child's own content.
+            if let Some(layer_id) = cmd.layer {
+                self.schedule_backdrop(layer_id, &mut target.schedule_state, rounds)?;
+            }
+
             // And optionally the composition of the child layer node.
             if let Some(child) = child {
                 self.compose_layer(child.props, child.layer, &mut target.schedule_state, rounds)?;
@@ -431,45 +443,14 @@ impl<'a, 'p> Scheduler<'a, 'p> {
         let region = target.schedule_state.draw_state.target;
 
         if let Some(filter) = target.filter {
-            let temporary = self.cursor.allocate_layer(LayerAllocationRequest::new(
-                region.texture.rect,
-                layer.kind,
-                region.texture.target.texture_parity.opposite(),
-            ))?;
-            let textures = FilterTextureRegions::new(region.texture, temporary.allocation.region);
-
-            if filter.data.needs_copy_pass() {
-                self.cursor.require_scratch_texture();
-            }
-
-            // Now we determine the point at which we can perform the filter operation.
-            let mut filter_point =
-                // Obviously, we first need to wait until rendering of the underlying layer finished.
-                target.schedule_state.ready
-                // Then, we must wait until our reserved space in the atlas is available.
-                .max(SchedulePoint::start(temporary.round_idx))
-                // Finally, wait until we reach the filter stage.
-                .after(RoundStage::filter(region.texture.target.texture_parity));
-
-            // Now find the _actual_ schedule point that corresponds to a round that matches our
-            // requirements for texture bindings.
-            filter_point = rounds.bind_at_or_after(filter_point, textures.round_bindings());
-
-            rounds.ensure_exists(filter_point.round);
-            rounds.round_mut(filter_point.round).push_filter_op(
-                region.texture.target.texture_parity,
-                &mut self.storage.buffers,
-                FilterOp {
-                    textures,
-                    filter_data_offset: filter.data_offset,
-                    gpu_filter: filter.data,
-                },
-            );
-
-            self.clear_and_release_allocation(temporary.allocation, filter_point.round, rounds);
-
             // Since we need to apply a filter, update the state of the current target.
-            target.schedule_state.ready = filter_point;
+            target.schedule_state.ready = self.schedule_filter(
+                region,
+                layer.kind,
+                filter,
+                target.schedule_state.ready,
+                rounds,
+            )?;
         }
 
         let scheduled = ScheduledLayer {
@@ -740,7 +721,7 @@ impl<'a, 'p> Scheduler<'a, 'p> {
         let draw_point = rounds.build_draw(
             parent_state,
             &mut self.storage.buffers.draw_buffers,
-            Some(&child_layer),
+            Some(child_layer.sampled()),
             |builder| {
                 builder.push_layer_fill(
                     child_layer.sample_region,
@@ -796,6 +777,151 @@ impl<'a, 'p> Scheduler<'a, 'p> {
         self.cursor.release(allocation, round_idx);
     }
 
+    /// Filter a rendered filter-layer allocation in place, once it is ready, and return the
+    /// point after which the filtered result is available.
+    fn schedule_filter(
+        &mut self,
+        region: LayerTextureRegion,
+        kind: &RecordedLayerKind,
+        filter: PreparedGpuFilter,
+        ready: SchedulePoint,
+        rounds: &mut Rounds,
+    ) -> Result<SchedulePoint, RenderError> {
+        let temporary = self.cursor.allocate_layer(LayerAllocationRequest::new(
+            region.texture.rect,
+            kind,
+            region.texture.target.texture_parity.opposite(),
+        ))?;
+        let textures = FilterTextureRegions::new(region.texture, temporary.allocation.region);
+
+        if filter.data.needs_copy_pass() {
+            self.cursor.require_scratch_texture();
+        }
+
+        // Now we determine the point at which we can perform the filter operation.
+        let mut filter_point =
+            // Obviously, we first need to wait until rendering of the underlying layer finished.
+            ready
+            // Then, we must wait until our reserved space in the atlas is available.
+            .max(SchedulePoint::start(temporary.round_idx))
+            // Finally, wait until we reach the filter stage.
+            .after(RoundStage::filter(region.texture.target.texture_parity));
+
+        // Now find the _actual_ schedule point that corresponds to a round that matches our
+        // requirements for texture bindings.
+        filter_point = rounds.bind_at_or_after(filter_point, textures.round_bindings());
+
+        rounds.ensure_exists(filter_point.round);
+        rounds.round_mut(filter_point.round).push_filter_op(
+            region.texture.target.texture_parity,
+            &mut self.storage.buffers,
+            FilterOp {
+                textures,
+                filter_data_offset: filter.data_offset,
+                gpu_filter: filter.data,
+            },
+        );
+
+        self.clear_and_release_allocation(temporary.allocation, filter_point.round, rounds);
+
+        Ok(filter_point)
+    }
+
+    /// PATCH(diaryx): compose a layer's backdrop into its parent, before the layer itself.
+    ///
+    /// The parent's pixels around the layer's clip, as drawn so far, are copied into a filter
+    /// allocation of the opposite parity, filtered there like any filter layer, and drawn back
+    /// into the parent through the clip at the layer's opacity. Reading as far as the filter
+    /// spreads beyond the clip keeps the clip's edge from fading into the transparent padding,
+    /// except where the parent itself ends.
+    fn schedule_backdrop(
+        &mut self,
+        layer_id: u32,
+        parent_state: &mut TargetScheduleState<LayerTextureRegion>,
+        rounds: &mut Rounds,
+    ) -> Result<(), RenderError> {
+        // Both outlive the scheduler's own borrow.
+        let (backdrops, recorder) = (self.backdrops, self.recorder);
+        let Some((_, filter_data)) = backdrops.iter().find(|(id, _)| *id == layer_id) else {
+            return Ok(());
+        };
+        let props = &recorder.layers[layer_id as usize].props;
+        let Some(clip_path) = &props.clip_path else {
+            return Ok(());
+        };
+
+        let parent_region = parent_state.draw_state.target;
+        let read_bbox = clip_path
+            .bbox
+            .expand(filter_data.filter_padding)
+            .intersect(parent_region.layer_bbox);
+        if read_bbox.is_empty() || clip_path.bbox.intersect(read_bbox).is_empty() {
+            return Ok(());
+        }
+
+        // Only the padding the allocation takes depends on the kind; the placement is unused.
+        let kind = RecordedLayerKind::Filter {
+            filter_data: filter_data.clone(),
+            placement: FilterLayerPlacement::default(),
+        };
+        let filter = self.storage.filter_context.push(filter_data);
+
+        let allocation = self.cursor.allocate_layer(LayerAllocationRequest::new(
+            read_bbox,
+            &kind,
+            parent_region.texture.target.texture_parity.opposite(),
+        ))?;
+        let backdrop_region = LayerTextureRegion {
+            texture: allocation.allocation.region,
+            layer_bbox: read_bbox,
+        };
+        let mut backdrop_state =
+            TargetScheduleState::new_layer(backdrop_region, allocation.round_idx);
+
+        // Copy what the parent holds there now.
+        let parent_ready = parent_state.ready;
+        rounds.build_draw(
+            &mut backdrop_state,
+            &mut self.storage.buffers.draw_buffers,
+            Some(SampledRegion {
+                target: parent_region.texture.target,
+                ready: parent_ready,
+            }),
+            |builder| {
+                builder.push_layer_fill(
+                    parent_region.crop_to(read_bbox),
+                    1.0,
+                    None,
+                    self.strip_storage,
+                );
+            },
+        );
+
+        let filtered =
+            self.schedule_filter(backdrop_region, &kind, filter, backdrop_state.ready, rounds)?;
+
+        // And draw it back through the clip.
+        let draw_point = rounds.build_draw(
+            parent_state,
+            &mut self.storage.buffers.draw_buffers,
+            Some(SampledRegion {
+                target: backdrop_region.texture.target,
+                ready: filtered,
+            }),
+            |builder| {
+                builder.push_layer_fill(
+                    backdrop_region,
+                    props.opacity,
+                    Some(clip_path),
+                    self.strip_storage,
+                );
+            },
+        );
+        self.clear_and_release_allocation(allocation.allocation, draw_point.round, rounds);
+
+        Ok(())
+    }
+
     /// Lazily allocate a target for an open layer and return its scheduling state.
     fn ensure_layer_target<'b>(
         &mut self,
@@ -842,6 +968,25 @@ struct ScheduledLayer {
     /// Texture region and scene-space bounds sampled by the parent.
     sample_region: LayerTextureRegion,
     /// Point after which the rendered layer contents are available.
+    ready: SchedulePoint,
+}
+
+impl ScheduledLayer {
+    /// The texture a parent samples this layer from, and when it can.
+    fn sampled(&self) -> SampledRegion {
+        SampledRegion {
+            target: self.sample_region.texture.target,
+            ready: self.ready,
+        }
+    }
+}
+
+/// A texture a draw samples from, and the point after which its contents are available.
+#[derive(Debug, Clone, Copy)]
+struct SampledRegion {
+    /// Texture page containing the sampled region.
+    target: LayerTextureId,
+    /// Point after which the sampled contents are available.
     ready: SchedulePoint,
 }
 
@@ -930,12 +1075,12 @@ impl Rounds {
         &mut self,
         state: &mut TargetScheduleState<T>,
         draw_buffers: &mut DrawBuffers,
-        sampled_layer: Option<&ScheduledLayer>,
+        sampled_layer: Option<SampledRegion>,
         f: impl FnOnce(&mut DrawBuilder<'_, T>),
     ) -> SchedulePoint {
         let sampled_layer_round_bindings = sampled_layer
             .map_or_else(RoundBindings::default, |layer| {
-                RoundBindings::new(layer.sample_region.texture.target)
+                RoundBindings::new(layer.target)
             });
 
         let round_bindings = state

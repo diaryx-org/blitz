@@ -225,6 +225,8 @@ pub struct Scene {
     filter: Option<Filter>,
     /// The command recorder.
     pub(crate) recorder: CommandRecorder<RecordedDraw>,
+    /// PATCH(diaryx): the backdrop filter of each recorded layer that has one, by layer id.
+    pub(crate) backdrops: Vec<(u32, FilterData)>,
 }
 
 impl Scene {
@@ -250,6 +252,7 @@ impl Scene {
             strip_storage: RefCell::new(StripStorage::new(GenerationMode::Append)),
             filter: None,
             recorder: CommandRecorder::new(width, height),
+            backdrops: vec![],
         }
     }
 
@@ -695,6 +698,47 @@ impl Scene {
         );
     }
 
+    /// PATCH(diaryx): push a new layer whose clip area first shows what is beneath it, filtered:
+    /// CSS's `backdrop-filter`.
+    ///
+    /// The backdrop is the parent layer's pixels under `clip_path`, drawn so far, filtered by
+    /// `backdrop_filter` and composed into the parent through the clip at the layer's opacity.
+    /// The layer's own content is drawn over it as usual. A backdrop at the root renders the root
+    /// into an intermediate layer, as a non-default blend there does, so that it can be read.
+    /// Without a clip path there is no area to show the backdrop in, and none is drawn.
+    pub fn push_layer_with_backdrop(
+        &mut self,
+        clip_path: Option<&BezPath>,
+        blend_mode: Option<BlendMode>,
+        opacity: Option<f32>,
+        mask: Option<Mask>,
+        filter: Option<Filter>,
+        backdrop_filter: Option<Filter>,
+    ) {
+        // The transform the layer's own content and clip are drawn with.
+        let backdrop = backdrop_filter
+            .filter(|_| clip_path.is_some())
+            .map(|filter| FilterData::new(filter, self.effective_path_transform()));
+        let id = u32::try_from(self.recorder.layers.len()).unwrap();
+        self.push_layer(clip_path, blend_mode, opacity, mask, filter);
+
+        if let Some(backdrop) = backdrop {
+            if self.recorder.layers[id as usize].depth == 1 {
+                // The user's surface cannot be sampled.
+                self.recorder.root_is_blend_target = true;
+            }
+            // The backdrop is copied into a filter allocation as large as the region it is read
+            // from, at most the scene.
+            let scene_size = self.recorder.scene_size;
+            self.recorder.largest_filter_layer_size = Some(
+                self.recorder
+                    .largest_filter_layer_size
+                    .map_or(scene_size, |size| size.max(scene_size)),
+            );
+            self.backdrops.push((id, backdrop));
+        }
+    }
+
     /// Push a new clip layer.
     ///
     /// See the explanation in the [clipping](https://github.com/linebender/vello/tree/main/vello_cpu/examples)
@@ -866,6 +910,7 @@ impl Scene {
         self.render_state.reset();
         self.aliasing_threshold = None;
         self.recorder.reset(self.width, self.height);
+        self.backdrops.clear();
         self.filter = None;
     }
 
