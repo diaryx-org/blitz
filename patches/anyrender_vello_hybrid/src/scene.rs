@@ -296,6 +296,10 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                 let _ = self
                     .scene
                     .glyph_run(self.image_manager.resources, font)
+                    // PATCH(diaryx): through glifo's atlas, which vello_gpu
+                    // can draw a bitmap glyph (an emoji) from; off, every
+                    // bitmap glyph is a pixmap paint, and vello_gpu panics.
+                    .atlas_cache(true)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
@@ -312,6 +316,10 @@ impl PaintScene for VelloHybridScenePainter<'_> {
                 let _ = self
                     .scene
                     .glyph_run(self.image_manager.resources, font)
+                    // PATCH(diaryx): through glifo's atlas, which vello_gpu
+                    // can draw a bitmap glyph (an emoji) from; off, every
+                    // bitmap glyph is a pixmap paint, and vello_gpu panics.
+                    .atlas_cache(true)
                     .font_size(font_size)
                     .hint(hint)
                     .normalized_coords(normalized_coords)
