@@ -52,6 +52,14 @@ patch, the first frame panics.
 the area the backdrop shows in (`src/scene.rs`, `src/webgl_scene.rs`,
 `PATCH(diaryx)`). It needs `patches/vello_gpu`; see its `PATCH.md`.
 
+## Filters of more than one step
+
+`convert_filter` (`src/filters.rs`) converted the first step of a filter and
+dropped the rest, and dropped a color matrix outright. It now converts every
+step, color matrices included, into one vello_common filter graph, skipping
+a step vello_gpu cannot draw; `patches/vello_gpu` draws a first step and the
+color matrices after it. So `filter: blur(4px) brightness(0.8)` draws both.
+
 ## What it does not do
 
 The atlas grows to 8 pages of 4096 × 4096; a bitmap glyph that finds none
