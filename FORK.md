@@ -31,11 +31,12 @@ winit-uikit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # The renderer, patched (patches/anyrender_vello/PATCH.md), with the `vello`
 # feature: alone, as its manifest takes its siblings from crates.io
 anyrender_vello = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
-# Or, with the `vello-hybrid` feature, the three that draw emoji and
-# backdrop filters with it (patches/*/PATCH.md)
+# Or, with the `vello-hybrid` feature, the four that draw emoji, backdrop
+# filters and color matrices with it (patches/*/PATCH.md)
 anyrender_vello_hybrid = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 glifo = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 vello_gpu = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+vello_gpu_shaders = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 ```
 
 Patch **every** crate of this repository that is in the graph, not only the
@@ -53,8 +54,8 @@ older line (0.7) than the published 0.8 alphas, which stay crates.io's.
 - **A new Blitz release** that dioxus-native moves to: `leaf` is rebased onto
   its tag. A change upstream now has is dropped then. The winit backends in
   `patches/` move with it, to the winit that release pins, and
-  `anyrender_vello`, `anyrender_vello_hybrid`, `glifo` and `vello_gpu` to
-  the anyrender and vello it takes; each goes when its fix is in that release.
+  `anyrender_vello`, `anyrender_vello_hybrid`, `glifo`, `vello_gpu` and
+  `vello_gpu_shaders` to the anyrender and vello it takes; each goes when its fix is in that release.
 - **A winit fix** goes upstream to winit, not Blitz (each `PATCH.md` says
   where it stands).
 - Commits follow the diaryx-org rules: Conventional Commits, a
@@ -116,3 +117,8 @@ And `vello_gpu`, with `anyrender_vello_hybrid`, so that `vello-hybrid` draws
 CSS `backdrop-filter`: what is beneath an element, filtered, through its
 border box (`patches/vello_gpu/PATCH.md`). `blitz-paint` clips a backdrop to
 the rounded border box rather than its bounding rectangle.
+
+And `vello_gpu_shaders`, with `vello_gpu` and `anyrender_vello_hybrid`, so
+that `vello-hybrid` draws color matrices (CSS's `brightness()`, `contrast()`
+and the rest) and a filter of a blur and a matrix after it: blurred shapes
+that merge, the "gooey" effect.
