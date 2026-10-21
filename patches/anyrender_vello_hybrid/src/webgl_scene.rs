@@ -116,16 +116,29 @@ impl PaintScene for WebGlScenePainter<'_> {
         transform: Affine,
         clip: &impl Shape,
         filter: Option<Arc<Filter>>,
-        _backdrop_filter: Option<Arc<Filter>>,
+        backdrop_filter: Option<Arc<Filter>>,
     ) {
         let filter = filter.and_then(crate::filters::convert_filter);
+        // PATCH(diaryx): the backdrop, which vello_gpu draws through the layer's own clip path.
+        let backdrop_filter = backdrop_filter.and_then(crate::filters::convert_filter);
         self.scene.set_transform(transform);
         self.scene.set_fill_rule(fill);
         self.layer_stack.push(LayerKind::Layer);
-        self.scene
-            .push_clip_path(&clip.into_path(DEFAULT_TOLERANCE));
-        self.scene
-            .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+        let clip = clip.into_path(DEFAULT_TOLERANCE);
+        self.scene.push_clip_path(&clip);
+        if backdrop_filter.is_some() {
+            self.scene.push_layer_with_backdrop(
+                Some(&clip),
+                Some(blend.into()),
+                Some(alpha),
+                None,
+                filter,
+                backdrop_filter,
+            );
+        } else {
+            self.scene
+                .push_layer(None, Some(blend.into()), Some(alpha), None, filter);
+        }
     }
 
     fn push_clip_layer(&mut self, fill: Fill, transform: Affine, clip: &impl Shape) {

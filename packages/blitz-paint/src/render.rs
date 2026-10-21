@@ -40,7 +40,7 @@ use style::{
     },
 };
 
-use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
+use kurbo::{self, Affine, BezPath, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
 use peniko::{self, Fill, ImageData, ImageSampler};
 use style::values::generics::color::GenericColor;
 use taffy::Layout;
@@ -514,6 +514,15 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                 effect_layer_clip.y0 += filter_expansion_area.y0;
                 effect_layer_clip.x1 += filter_expansion_area.x1;
                 effect_layer_clip.y1 += filter_expansion_area.y1;
+
+                // A backdrop shows through the border box itself, round corners and all. A
+                // layer with a filter must reach as far as the filter spreads, so it keeps the
+                // expanded rectangle, and a backdrop with it shows square corners.
+                let effect_layer_clip: BezPath = if backdrop_filter.is_some() && filter.is_none() {
+                    cx.frame.border_box_path()
+                } else {
+                    effect_layer_clip.to_path(0.1)
+                };
 
                 // Opacity/Filter layer if box has opacity or a filter.
                 // Clipped to border-box as it needs to include the background and borders.
