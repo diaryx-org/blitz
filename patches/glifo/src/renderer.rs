@@ -666,8 +666,14 @@ pub(crate) fn supports_atlas_caching(transform: &Affine, glyph_type: CachedGlyph
         // For bitmap glyphs, we need to relax the condition a bit, since bitmap glyphs already have a fixed
         // size and thus might not correspond 100% to the font size. Therefore, they likely don't have a unit
         // transform.
+        // PATCH(diaryx): any transform that does not flatten the glyph. The
+        // atlas holds the bitmap's own pixels and is drawn as an image
+        // through `transform`, as the uncached pixmap would be, so a skew (an
+        // emoji in synthesised italic), a turn or a mirror draws the same
+        // from either; and vello_gpu cannot draw the uncached pixmap at all.
         CachedGlyphType::Bitmap => {
-            !transform.has_skew() && a.is_sign_positive() && d.is_sign_positive()
+            let det = transform.determinant();
+            det.is_finite() && det != 0.0
         }
     }
 }
@@ -693,10 +699,6 @@ mod tests {
 
     #[test]
     fn rejects_skewed_transforms() {
-        assert!(!supports_atlas_caching(
-            &Affine::new([1.0, 0.1, 0.0, 1.0, 0.0, 0.0]),
-            CachedGlyphType::Bitmap
-        ));
         assert!(!supports_atlas_caching(
             &Affine::skew(0.2, 0.0),
             CachedGlyphType::Outline
@@ -743,22 +745,26 @@ mod tests {
         ));
     }
 
+    // PATCH(diaryx): a bitmap is cached under any transform it can be drawn
+    // through, and only a flattening one is refused.
     #[test]
-    fn bitmap_allows_positive_scales_only() {
-        assert!(supports_atlas_caching(
-            &Affine::scale_non_uniform(1.0, 1.0),
-            CachedGlyphType::Bitmap
-        ));
-        assert!(supports_atlas_caching(
-            &Affine::scale_non_uniform(2.0, 3.0),
-            CachedGlyphType::Bitmap
-        ));
+    fn bitmap_allows_any_invertible_transform() {
+        for transform in [
+            Affine::scale_non_uniform(1.0, 1.0),
+            Affine::scale_non_uniform(2.0, 3.0),
+            Affine::new([1.0, 0.1, 0.0, 1.0, 0.0, 0.0]),
+            Affine::skew(0.2, 0.0),
+            Affine::rotate(1.0),
+            Affine::scale_non_uniform(1.0, -1.0),
+            Affine::scale_non_uniform(-1.0, 1.0),
+        ] {
+            assert!(
+                supports_atlas_caching(&transform, CachedGlyphType::Bitmap),
+                "{transform:?}"
+            );
+        }
         assert!(!supports_atlas_caching(
-            &Affine::scale_non_uniform(1.0, -1.0),
-            CachedGlyphType::Bitmap
-        ));
-        assert!(!supports_atlas_caching(
-            &Affine::scale_non_uniform(-1.0, 1.0),
+            &Affine::scale_non_uniform(1.0, 0.0),
             CachedGlyphType::Bitmap
         ));
     }

@@ -464,6 +464,10 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
             .atlas_cacher
             .config()
             .is_some_and(|config| draw_props.font_size <= config.max_cached_font_size);
+        // PATCH(diaryx): a bitmap is cached at its strike's own size, which
+        // the key holds, not at the run's, so the run's size does not bound
+        // it; and vello_gpu can draw a bitmap glyph only from the atlas.
+        let bitmap_cache_enabled = self.atlas_cacher.config().is_some();
         let outline_cache_enabled = colr_bitmap_cache_enabled
             // Due to the various parameters that would need to be considered in the cache key,
             // we never cache stroked outlines for now. For COLR and bitmap, this doesn't matter
@@ -655,7 +659,7 @@ impl<'a, 'b, Glyphs: Iterator<Item = Glyph> + Clone> GlyphRunRenderer<'a, 'b, Gl
 
                 // Bitmaps are not hinted and have no sub-pixel offset or
                 // context color; variation coords are irrelevant for fixed strikes.
-                let cache_key = colr_bitmap_cache_enabled.then(|| GlyphCacheKey {
+                let cache_key = bitmap_cache_enabled.then(|| GlyphCacheKey {
                     font_id: font_info.id,
                     font_index: font_info.index,
                     glyph_id: glyph.id,
@@ -2557,6 +2561,38 @@ mod tests {
     #[test]
     fn bitmap_glyph_is_not_cached_when_atlas_cache_is_disabled() {
         ensure_no_cache(TestGlyphKind::Bitmap, Style::Fill, false);
+    }
+
+    // PATCH(diaryx): a bitmap glyph is cached above `max_cached_font_size`
+    // and in synthesised italic, where vello_gpu could not draw it uncached.
+    #[cfg(feature = "png")]
+    #[test]
+    fn large_or_skewed_bitmap_glyph_is_cached() {
+        let font = test_font(TestGlyphKind::Bitmap);
+        let glyph = test_glyph(&font, TestGlyphKind::Bitmap);
+        let mut resources = TestResources::default();
+        for (font_size, glyph_transform) in [(200.0, None), (20.0, Some(Affine::skew(0.2, 0.0)))] {
+            let transform = Affine::translate((0.0, font_size as f64));
+            let mut run = GlyphRun {
+                font: font.clone(),
+                font_size,
+                font_embolden: FontEmbolden::default(),
+                transform,
+                scene_paint_transform: transform,
+                glyph_transform,
+                normalized_coords: &[],
+                hint: false,
+            }
+            .build(
+                core::iter::once(glyph),
+                resources.prep_cache.as_mut(),
+                AtlasCacher::Enabled(&mut resources.glyph_atlas, &mut resources.image_cache),
+            );
+            assert_eq!(run.fill_glyphs(&mut resources.renderer), Ok(()));
+        }
+        // One entry: the strike is the same at either size, and both drew it.
+        assert_eq!(resources.glyph_atlas.len(), 1);
+        assert_eq!(resources.glyph_atlas.cache_hits(), 1);
     }
 
     #[test]
