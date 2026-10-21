@@ -9,8 +9,9 @@ patches/anyrender_vello_hybrid` here is the patch.
 Consumers take it with `[patch.crates-io]` in their root manifest, from this
 repository's branch the rest of their Blitz comes from, `{ git =
 "https://github.com/diaryx-org/blitz", branch = "leaf" }`, together with
-`patches/glifo`: this crate alone draws an ordinary emoji, and glifo's patch
-covers the rest (its `PATCH.md`). Its manifest is the published one, which
+`patches/glifo` and `patches/vello_gpu`: this crate alone draws an ordinary
+emoji, glifo's patch covers the rest, and vello_gpu's draws a backdrop filter
+(each `PATCH.md`). Its manifest is the published one, which
 takes anyrender, vello_gpu and glifo from crates.io, so none of its siblings
 need patching.
 
@@ -43,6 +44,13 @@ Checked on a Mac with unit's gallery built on `vello-hybrid`: a face, a
 party popper and a thumbs-up with a skin tone in a heading, and with
 `patches/glifo`, the same in italic and a crab at 160 px. Without the
 patch, the first frame panics.
+
+## Backdrop filters
+
+`push_layer` passes a layer's backdrop filter to vello_gpu's
+`push_layer_with_backdrop`, with the layer's clip shape as its clip path,
+the area the backdrop shows in (`src/scene.rs`, `src/webgl_scene.rs`,
+`PATCH(diaryx)`). It needs `patches/vello_gpu`; see its `PATCH.md`.
 
 ## What it does not do
 
