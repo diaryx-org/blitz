@@ -299,6 +299,47 @@ struct Painter<'a> {
     root: NodeId,
     /// Where each inline box's line put it: its cell and its width in pixels.
     inline_cells: HashMap<NodeId, (i32, i32, f32)>,
+    /// Each cell a border was drawn in: the arms of its line, the
+    /// character last written there, and its layer, for [`Self::join`].
+    rules: HashMap<(i32, i32), (u8, &'static str, u32)>,
+    /// The layer being painted: the page's, 0, or a hoisted box's — a menu,
+    /// a dialog — each its own, so its lines never meet the page's under it.
+    layer: u32,
+    /// The last layer given out.
+    layers: u32,
+}
+
+/// The arms of a box-drawing character: the ways its lines run from the
+/// cell's centre.
+const UP: u8 = 1;
+const DOWN: u8 = 2;
+const LEFT: u8 = 4;
+const RIGHT: u8 = 8;
+
+/// Whether cell `c`, `r` is on the grid and shows `ch`.
+fn shows(g: &Grid, c: i32, r: i32, ch: &str) -> bool {
+    c >= 0
+        && r >= 0
+        && c < g.cols as i32
+        && r < g.rows as i32
+        && g.get(c as u16, r as u16).text == ch
+}
+
+/// The light box-drawing character with `arms`.
+fn line_of(arms: u8) -> &'static str {
+    match arms {
+        a if a == LEFT | RIGHT || a == LEFT || a == RIGHT => "─",
+        a if a == UP | DOWN || a == UP || a == DOWN => "│",
+        a if a == DOWN | RIGHT => "┌",
+        a if a == DOWN | LEFT => "┐",
+        a if a == UP | RIGHT => "└",
+        a if a == UP | LEFT => "┘",
+        a if a == UP | DOWN | RIGHT => "├",
+        a if a == UP | DOWN | LEFT => "┤",
+        a if a == LEFT | RIGHT | DOWN => "┬",
+        a if a == LEFT | RIGHT | UP => "┴",
+        _ => "┼",
+    }
 }
 
 /// Paint `doc`, already resolved, into a fresh grid of `cols` × `rows`.
@@ -323,8 +364,12 @@ pub fn paint(doc: &BaseDocument, opts: &PaintOptions, cols: u16, rows: u16) -> G
         grid: &mut grid,
         root: root.id,
         inline_cells: HashMap::new(),
+        rules: HashMap::new(),
+        layer: 0,
+        layers: 0,
     };
     p.element(root.id, (-scroll.x as f32, -scroll.y as f32), clip);
+    p.join();
     grid
 }
 
@@ -482,7 +527,7 @@ impl Painter<'_> {
         if let Some(sc) = &node.stacking_context {
             for h in sc.neg_z_hoisted_children() {
                 let p = h.position(node.tree(), id);
-                self.render(h.node_id, (base.0 + p.x, base.1 + p.y), inner_clip);
+                self.hoisted(h.node_id, (base.0 + p.x, base.1 + p.y), inner_clip);
             }
         }
         let kids: Vec<NodeId> = match &*node.paint_children.borrow() {
@@ -502,7 +547,7 @@ impl Painter<'_> {
         if let Some(sc) = &node.stacking_context {
             for h in sc.pos_z_hoisted_children() {
                 let p = h.position(node.tree(), id);
-                self.render(h.node_id, (base.0 + p.x, base.1 + p.y), inner_clip);
+                self.hoisted(h.node_id, (base.0 + p.x, base.1 + p.y), inner_clip);
             }
         }
         // The border last, over the children: in pixels a child stays inside
@@ -512,6 +557,15 @@ impl Painter<'_> {
         if l.border.left + l.border.right + l.border.top + l.border.bottom > 0.0 {
             self.borders(styles, bbox, l, clip);
         }
+    }
+
+    /// A hoisted child, in a layer of its own.
+    fn hoisted(&mut self, id: NodeId, origin: (f32, f32), clip: Rect) {
+        let outer = self.layer;
+        self.layers += 1;
+        self.layer = self.layers;
+        self.render(id, origin, clip);
+        self.layer = outer;
     }
 
     /// Record an `img` at `b`, drawn to cells as [`Self::frame`] does.
@@ -661,23 +715,21 @@ impl Painter<'_> {
             let (c, a) = rgb(&col.resolve_to_absolute(&cc));
             (a > 0.05).then_some((c, a))
         };
-        let col_of = |x: f32| (x / m.cw).floor() as i32;
-        let (c0, c1) = (col_of(b.x0), col_of((b.x1 - 0.01).max(b.x0)));
-        // A horizontal edge takes the row boundary it is nearest: the top
-        // side runs along the row that starts there, the bottom side along
-        // the row that ends there, and the sides between them.
+        // An edge takes the cell boundary it is nearest: the top side runs
+        // along the row that starts there and the bottom side along the row
+        // that ends there, the left side down the column that starts there
+        // and the right side down the column that ends there. Taffy rounds a
+        // box to whole pixels, so an edge laid out on a cell boundary is a
+        // fraction of a pixel to either side of it.
+        let c0 = (b.x0 / m.cw).round() as i32;
+        let c1 = ((b.x1 / m.cw).round() as i32 - 1).max(c0);
         let r0 = (b.y0 / m.ch).round() as i32;
         let r1 = ((b.y1 / m.ch).round() as i32 - 1).max(r0);
-        let put = |g: &mut Grid, c: i32, r: i32, ch: &str, (fg, a): (Rgb, f32)| {
-            let (px, py) = ((c as f32 + 0.5) * m.cw, (r as f32 + 0.5) * m.ch);
-            if !clip.contains(px, py) {
-                return;
-            }
-            if let Some(cell) = g.at(c, r) {
-                cell.text = ch.into();
-                cell.fg = blend(fg, a, cell.bg);
-            }
-        };
+        // This box's lines, each cell's arms and colour: a side's run, and
+        // where two sides meet, the corner in place of either, as the last
+        // written. A line already there from another box keeps its own arms,
+        // which `join` meets.
+        let mut own: HashMap<(i32, i32), (u8, (Rgb, f32))> = HashMap::new();
         // A horizontal side gets its row only when nothing is written in it
         // between the sides: a table cell a line high, or a button, keeps
         // its text rather than a rule drawn through it.
@@ -707,26 +759,84 @@ impl Painter<'_> {
         for (fg, r) in [(top, r0), (bottom, r1)] {
             if let Some(fg) = fg {
                 for c in c0..=c1 {
-                    put(self.grid, c, r, "─", fg);
+                    own.insert((c, r), (LEFT | RIGHT, fg));
                 }
             }
         }
         for (fg, c) in [(left, c0), (right, c1)] {
             if let Some(fg) = fg {
                 for r in r0..=r1 {
-                    put(self.grid, c, r, "│", fg);
+                    own.insert((c, r), (UP | DOWN, fg));
                 }
             }
         }
-        // Where two drawn sides meet, a corner.
-        for (h, v, c, r, ch) in [
-            (top, left, c0, r0, "┌"),
-            (top, right, c1, r0, "┐"),
-            (bottom, left, c0, r1, "└"),
-            (bottom, right, c1, r1, "┘"),
+        for (h, v, c, r, arms) in [
+            (top, left, c0, r0, DOWN | RIGHT),
+            (top, right, c1, r0, DOWN | LEFT),
+            (bottom, left, c0, r1, UP | RIGHT),
+            (bottom, right, c1, r1, UP | LEFT),
         ] {
             if let (Some(fg), Some(_)) = (h, v) {
-                put(self.grid, c, r, ch, fg);
+                own.insert((c, r), (arms, fg));
+            }
+        }
+        for ((c, r), (arms, (fg, a))) in own {
+            let (px, py) = ((c as f32 + 0.5) * m.cw, (r as f32 + 0.5) * m.ch);
+            if !clip.contains(px, py) {
+                continue;
+            }
+            let arms = match self.rules.get(&(c, r)) {
+                Some(&(had, ch, layer)) if layer == self.layer && shows(self.grid, c, r, ch) => {
+                    had | arms
+                }
+                _ => arms,
+            };
+            if let Some(cell) = self.grid.at(c, r) {
+                let ch = line_of(arms);
+                cell.text = ch.into();
+                cell.fg = blend(fg, a, cell.bg);
+                self.rules.insert((c, r), (arms, ch, self.layer));
+            }
+        }
+    }
+
+    /// Join the borders that meet: a line's end beside another line running
+    /// towards it gets an arm to it, so a table's cells, each drawing its own
+    /// box, read as one grid — `┬`, `┼`, `├` — rather than boxes side by
+    /// side. Only cells painted as borders, and still showing what was
+    /// painted there, take part, and only with lines of their own layer: a
+    /// box-drawing character in the page's text is the text's, a menu drawn
+    /// over a rule hides it, and the menu's sides do not meet the page's
+    /// rules beside them.
+    fn join(&mut self) {
+        let live: HashMap<(i32, i32), (u8, u32)> = self
+            .rules
+            .iter()
+            .filter(|&(&(c, r), &(_, ch, _))| shows(self.grid, c, r, ch))
+            .map(|(&at, &(arms, _, layer))| (at, (arms, layer)))
+            .collect();
+        let arm = |c: i32, r: i32, a: u8, layer: u32| {
+            live.get(&(c, r))
+                .is_some_and(|&(x, l)| l == layer && x & a != 0)
+        };
+        for (&(c, r), &(arms, layer)) in &live {
+            let mut joined = arms;
+            if arm(c, r - 1, DOWN, layer) {
+                joined |= UP;
+            }
+            if arm(c, r + 1, UP, layer) {
+                joined |= DOWN;
+            }
+            if arm(c - 1, r, RIGHT, layer) {
+                joined |= LEFT;
+            }
+            if arm(c + 1, r, LEFT, layer) {
+                joined |= RIGHT;
+            }
+            if joined != arms
+                && let Some(cell) = self.grid.at(c, r)
+            {
+                cell.text = line_of(joined).into();
             }
         }
     }
