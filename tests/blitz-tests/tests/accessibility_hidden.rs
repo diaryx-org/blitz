@@ -38,7 +38,7 @@ fn excludes_div_with_hidden_attribute() -> TestResult<()> {
         not(contains((
             anything(),
             matches_pattern!(AccessKitNode {
-                role(): eq(Role::GenericContainer)
+                html_tag(): eq(Some("div"))
             })
         )))
     )
@@ -59,7 +59,7 @@ fn excludes_div_with_display_none() -> TestResult<()> {
         not(contains((
             anything(),
             matches_pattern!(AccessKitNode {
-                role(): eq(Role::GenericContainer)
+                html_tag(): eq(Some("div"))
             })
         )))
     )
@@ -80,7 +80,7 @@ fn excludes_div_with_visibility_hidden() -> TestResult<()> {
         not(contains((
             anything(),
             matches_pattern!(AccessKitNode {
-                role(): eq(Role::GenericContainer)
+                html_tag(): eq(Some("div"))
             })
         )))
     )

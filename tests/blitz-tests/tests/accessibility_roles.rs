@@ -192,7 +192,7 @@ fn a_semantic_page_has_no_unknown_elements() {
         <footer>End</footer>
     </body></html>"##;
 
-    // <html> and <body> have no roles of their own. Everything else in
-    // this document should map to something an assistive technology can use.
-    assert_eq!(unknown_tags(html), vec!["body", "html"]);
+    // Every element maps to something an assistive technology can use;
+    // <html> and <body>, with no roles of their own, are generic containers.
+    assert_eq!(unknown_tags(html), Vec::<String>::new());
 }

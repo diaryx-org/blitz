@@ -43,7 +43,7 @@ fn includes_aria_labelledby_as_labelled_by_for_one_node() -> TestResult<()> {
     let (label_node_id, _) = tree_update
         .nodes
         .iter()
-        .find(|(_, node)| node.role() == Role::Label)
+        .find(|(_, node)| node.html_tag() == Some("label"))
         .expect("Label must be present in accessibility tree");
     verify_that!(
         tree_update.nodes,
@@ -87,7 +87,7 @@ fn includes_aria_labelledby_as_labelled_by_for_two_nodes() -> TestResult<()> {
         tree_update
             .nodes
             .iter()
-            .find(|(_, node)| node.role() == Role::Label)
+            .find(|(_, node)| node.html_tag() == Some("label"))
             .expect("Expected to find label another-element in the tree")
             .0,
     );
