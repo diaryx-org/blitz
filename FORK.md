@@ -128,3 +128,12 @@ through `--blitz-filter: url(#id)` and `--blitz-backdrop-filter: url(#id)`
 beside the standard `url(#id)`, which Stylo's Servo build cannot parse
 (`blitz-paint/src/filters.rs`). Its `feGaussianBlur`, `feColorMatrix` and
 `feOffset` are read as one chain, enough for blurred shapes that merge.
+
+And a package upstream does not have, `blitz-tui` (on the `tui` branch until
+it merges into `leaf`): Blitz's laid-out page painted into a terminal's
+character cells, a sibling of `blitz-paint` and `blitz-shell` that keeps the
+DOM, Stylo and taffy as they are. It runs any `blitz_dom::Document`, a Dioxus
+app included (`examples/tui_counter`), and is the renderer of leaf's terminal
+editor (`apps/leaf-dioxus-tui` there). Its README says what it draws and what
+it does not yet. Not `dioxus-tui`, the name DioxusLabs' retired terminal
+renderer has on crates.io.

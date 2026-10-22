@@ -1,0 +1,59 @@
+[package]
+name = "blitz-tui"
+description = "Paint a Blitz Document into a terminal's character cells"
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = ["svg"]
+# SVG pictures (an `<img>` of an SVG), rasterised for the terminal's
+# graphics protocol.
+svg = ["blitz-dom/svg", "dep:resvg", "dep:usvg"]
+# A winit `Window` that is the terminal, for an app that asks its window for
+# size and theme (as dioxus-native components may).
+winit = ["dep:winit", "dep:raw-window-handle"]
+
+[dependencies]
+# Blitz dependencies
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+
+# Servo dependencies
+style = { workspace = true }
+
+# DioxusLabs dependencies
+taffy = { workspace = true }
+
+# Linebender dependencies
+parley = { workspace = true }
+usvg = { workspace = true, optional = true }
+resvg = { version = "0.48.1", default-features = false, optional = true }
+
+# The terminal: crossterm for input and raw mode, ratatui for the cell
+# buffer and its diff, ratatui-image for pictures (kitty, iTerm2, sixel or
+# half-blocks).
+crossterm = "0.28"
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+ratatui-image = { version = "9", default-features = false, features = ["crossterm"] }
+image = { workspace = true }
+terminal-colorsaurus = "1"
+
+# Windowing
+winit = { workspace = true, optional = true }
+raw-window-handle = { workspace = true, optional = true }
+
+# Other dependencies
+keyboard-types = { workspace = true }
+smol_str = { workspace = true }
+unicode-segmentation = "1.13"
+unicode-width = "0.2"
+
+[dev-dependencies]
+blitz-dom = { workspace = true, features = ["system-fonts"] }
+blitz-html = { workspace = true }
