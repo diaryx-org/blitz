@@ -23,8 +23,8 @@ permissions:
 jobs:
   wpt:
     name: "Run WPT Tests"
-    runs-on: warp-ubuntu-latest-arm64-16x
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -33,7 +33,6 @@ jobs:
           key: "blitz-wpt-linux"
           cache-all-crates: "true"
           cache-workspace-crates: "true"
-          cache-provider: "warpbuild"
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # fonts-tlwg-loma-otf provides a Thai font; some WPT reftests (e.g.
       # css/css-text/i18n/css3-text-line-break-opclns-201.html) depend on Thai glyphs
