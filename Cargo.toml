@@ -22,6 +22,7 @@ members = [
     "wpt/runner",
     "tests/blitz-tests",
     "examples/counter",
+    "examples/tui_counter",
     "examples/transparent",
     "examples/seven_guis",
     "examples/todomvc",
