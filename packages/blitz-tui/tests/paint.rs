@@ -91,3 +91,79 @@ fn the_wheel_scrolls_the_page_down() {
     let first = g.text().lines().next().unwrap().to_string();
     assert_eq!(first, "line 3", "{}", g.text());
 }
+
+/// A table of cells, each drawing its right and bottom rule, the first row
+/// its top and the first column its left: in whole cells, as a terminal
+/// host lays one out.
+fn ruled_table(m: Metrics) -> String {
+    let (w, h) = (m.cw, m.ch);
+    let cell = |text: &str, left: bool, top: bool, bottom: bool| {
+        let width = if left { 6.0 } else { 5.0 } * w;
+        let side = |on: bool, px: f32| if on { px } else { 0.0 };
+        format!(
+            "<div style='box-sizing:border-box; width:{width}px; border:0 solid white; \
+             border-width:{}px {w}px {}px {}px'>{text}</div>",
+            side(top, h),
+            side(bottom, h),
+            side(left, w),
+        )
+    };
+    let row = |a: &str, b: &str, top: bool| {
+        format!(
+            "<div style='display:flex'>{}{}</div>",
+            cell(a, true, top, true),
+            cell(b, false, top, true)
+        )
+    };
+    format!(
+        "<body style='margin:0'>{}{}<p style='margin:0'>│ text ┼</p></body>",
+        row("ab", "cd", true),
+        row("ef", "gh", false)
+    )
+}
+
+#[test]
+fn borders_that_meet_are_joined_into_one_grid() {
+    let opts = options();
+    let g = frame(&ruled_table(opts.metrics), &opts);
+    let t = g.text();
+    let lines: Vec<&str> = t.lines().collect();
+    assert_eq!(
+        lines[..6],
+        [
+            "┌────┬────┐",
+            "│ab  │cd  │",
+            "├────┼────┤",
+            "│ef  │gh  │",
+            "└────┴────┘",
+            // The page's own box characters are its text, not joined.
+            "│ text ┼",
+        ],
+        "{t}"
+    );
+}
+
+#[test]
+fn a_box_over_the_page_keeps_its_own_corners() {
+    let opts = options();
+    let m = opts.metrics;
+    let table = ruled_table(m);
+    let over = format!(
+        "<div style='position:absolute; z-index:1; left:0; top:0; box-sizing:border-box; \
+         width:{}px; height:{}px; background:black; border:1px solid white'></div>",
+        3.0 * m.cw,
+        3.0 * m.ch
+    );
+    let g = frame(
+        &table.replace(
+            "<body style='margin:0'>",
+            &format!("<body style='margin:0'>{over}"),
+        ),
+        &opts,
+    );
+    let t = g.text();
+    let lines: Vec<&str> = t.lines().collect();
+    // Its corners meet the table's rules beside them, and stay corners.
+    assert!(lines[0].starts_with("┌─┐─"), "{t}");
+    assert!(lines[2].starts_with("└─┘─"), "{t}");
+}
