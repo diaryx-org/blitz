@@ -1,0 +1,17 @@
+[package]
+name = "tui_counter"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[dependencies]
+blitz-tui = { workspace = true, features = ["svg"] }
+blitz-dom = { workspace = true, features = ["system-fonts"] }
+dioxus-native-dom = { workspace = true, features = ["system-fonts"] }
+dioxus = { workspace = true, features = ["macro", "html", "signals", "hooks"] }
+dioxus-core = { workspace = true }
+
+[dev-dependencies]
+blitz-traits = { workspace = true }
+crossterm = "0.28"
