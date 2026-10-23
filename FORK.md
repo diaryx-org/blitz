@@ -76,6 +76,9 @@ page:
   modal, orientation; the roles switch and separator.
 - An action request carried out: a click as a click, through the window's
   own events (`View::click_events`, `View::accessibility_action_events`).
+- A hook through which the embedder changes each tree built before the
+  adapter sees it (`View::set_accessibility_tree_hook`): leaf's editor
+  becomes a text area there, with its value, text runs and selection.
 
 Events and layout, found by diaryx-org/unit's gallery:
 

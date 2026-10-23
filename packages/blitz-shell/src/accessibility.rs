@@ -1,5 +1,5 @@
 use crate::{BlitzShellEvent, event::BlitzShellProxy};
-use accesskit::Rect;
+use accesskit::{Rect, TreeUpdate};
 use accesskit_xplat::{Adapter, EventHandler, WindowEvent as AccessKitEvent};
 use blitz_dom::BaseDocument;
 use std::sync::Arc;
@@ -13,7 +13,15 @@ use winit::{
 pub struct AccessibilityState {
     // /// Adapter to connect to the [`EventLoop`](`winit::event_loop::EventLoop`).
     adapter: Adapter,
+    /// The embedder's changes to each tree built, made before the adapter
+    /// sees it ([`crate::View::set_accessibility_tree_hook`]).
+    hook: Option<TreeHook>,
 }
+
+/// What an embedder changes in the tree Blitz builds from a document, before
+/// assistive tech sees it: a node the page cannot describe in markup, such as
+/// an editor's text, with its runs, its selection and its value.
+pub type TreeHook = Box<dyn FnMut(&BaseDocument, &mut TreeUpdate)>;
 
 struct Handler {
     window_id: WindowId,
@@ -39,12 +47,24 @@ impl AccessibilityState {
                 window.window_handle().unwrap().as_raw(),
                 Arc::new(Handler { window_id, proxy }),
             ),
+            hook: None,
         }
     }
+
+    /// Sets the hook every tree built from now on passes through.
+    pub fn set_tree_hook(&mut self, hook: Option<TreeHook>) {
+        self.hook = hook;
+    }
+
     pub fn update_tree(&mut self, doc: &BaseDocument) {
-        let _ = doc;
-        self.adapter
-            .update_if_active(|| doc.build_accessibility_tree());
+        let hook = &mut self.hook;
+        self.adapter.update_if_active(|| {
+            let mut tree = doc.build_accessibility_tree();
+            if let Some(hook) = hook {
+                hook(doc, &mut tree);
+            }
+            tree
+        });
     }
 
     /// Allows reacting to window events.

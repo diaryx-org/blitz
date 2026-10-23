@@ -16,6 +16,8 @@ mod window;
 
 #[cfg(feature = "accessibility")]
 mod accessibility;
+#[cfg(feature = "accessibility")]
+pub use crate::accessibility::TreeHook as AccessibilityTreeHook;
 
 pub use crate::application::BlitzApplication;
 pub use crate::event::{BlitzShellEvent, BlitzShellProxy};
