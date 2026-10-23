@@ -794,10 +794,18 @@ impl TextInputData {
                 before_bytes,
                 after_bytes,
             } => {
-                let _ = before_bytes;
-                let _ = after_bytes;
-                // TODO
-                None
+                // The input method's text either side of the selection, gone
+                // before its next step: a correction, a word composed again,
+                // or Backspace from a keyboard that edits text rather than
+                // sending keys (Android's, through an application's own
+                // connection to it).
+                if let Some(after) = std::num::NonZeroUsize::new(after_bytes) {
+                    driver.delete_bytes_after_selection(after);
+                }
+                if let Some(before) = std::num::NonZeroUsize::new(before_bytes) {
+                    driver.delete_bytes_before_selection(before);
+                }
+                (before_bytes > 0 || after_bytes > 0).then_some(GeneratedTextInputEvent::Input)
             }
         }
     }
