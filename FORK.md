@@ -79,6 +79,13 @@ page:
 - A hook through which the embedder changes each tree built before the
   adapter sees it (`View::set_accessibility_tree_hook`): leaf's editor
   becomes a text area there, with its value, text runs and selection.
+- The tree rebuilt after every redraw, where the changes are resolved:
+  upstream rebuilds it on a poll that `has_changes`, which is never true
+  after the first node is made, so the tree kept the first screen.
+- A text input's text as its value (a password's as dots), its placeholder,
+  and the `Focus` and `SetValue` actions, carried out by
+  `View::accessibility_action`: `SetValue` focuses the input, selects all of
+  it and commits the new text, which the page hears as an `input` event.
 
 Events and layout, found by diaryx-org/unit's gallery:
 

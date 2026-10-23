@@ -164,6 +164,30 @@ impl BaseDocument {
 
             write_aria_states(element_data, role, &mut builder);
 
+            // A text field's text is its editor's, not the page's: no text
+            // node holds it. It is the field's value, which assistive tech
+            // may replace, and the field may be focused.
+            if let Some(input) = element_data.text_input_data() {
+                let text = input.editor.raw_text();
+                if element_data.attr(local_name!("type")) == Some("password") {
+                    builder.set_value("•".repeat(text.chars().count()));
+                } else {
+                    builder.set_value(text);
+                }
+                if let Some(placeholder) = element_data.attr(local_name!("placeholder")) {
+                    builder.set_placeholder(placeholder);
+                }
+                if element_data.attr(local_name!("readonly")).is_some() {
+                    builder.set_read_only();
+                }
+                if !builder.is_disabled() {
+                    builder.add_action(Action::Focus);
+                    if !builder.is_read_only() {
+                        builder.add_action(Action::SetValue);
+                    }
+                }
+            }
+
             if let Some(aria_selected) = element_data.attr(local_name!("aria-selected"))
                 && let Ok(aria_selected) = aria_selected.parse()
             {
