@@ -49,6 +49,7 @@ use style::data::{ElementData as StyloElementData, ElementStyles};
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::media_queries::MediaType;
 use style::properties::ComputedValues;
+use style::properties::longhands::visibility;
 use style::properties::style_structs::Font;
 use style::selector_parser::ServoElementSnapshot;
 use style::servo_arc::Arc as ServoArc;
@@ -1764,7 +1765,9 @@ impl BaseDocument {
 
     pub fn focus_next_node(&mut self) -> Option<NodeId> {
         let focussed_node_id = self.get_focussed_node_id()?;
-        let id = self.next_node(&self.nodes[focussed_node_id], |node| node.is_focussable())?;
+        let id = self.next_node(&self.nodes[focussed_node_id], |node| {
+            node.is_focussable() && self.is_rendered(node)
+        })?;
         self.set_focus_to(id);
         Some(id)
     }
@@ -1772,9 +1775,38 @@ impl BaseDocument {
     /// Move focus to the previous focussable node in the document
     pub fn focus_prev_node(&mut self) -> Option<NodeId> {
         let focussed_node_id = self.get_focussed_node_id()?;
-        let id = self.prev_node(&self.nodes[focussed_node_id], |node| node.is_focussable())?;
+        let id = self.prev_node(&self.nodes[focussed_node_id], |node| {
+            node.is_focussable() && self.is_rendered(node)
+        })?;
         self.set_focus_to(id);
         Some(id)
+    }
+
+    /// Whether `node` is drawn, and so may be focused by Tab: neither it nor
+    /// an ancestor is `display: none`, and it is not `visibility: hidden`.
+    /// A browser's sequential focus passes over what is not rendered: a
+    /// closed menu's items, a hidden dialog's buttons.
+    fn is_rendered(&self, node: &Node) -> bool {
+        match node.primary_styles() {
+            Some(s)
+                if s.get_inherited_box().visibility == visibility::computed_value::T::Hidden =>
+            {
+                return false;
+            }
+            // Stylo leaves what is inside a `display: none` element unstyled.
+            None if node.is_element() => return false,
+            _ => {}
+        }
+        let mut at = Some(node);
+        while let Some(n) = at {
+            if n.primary_styles()
+                .is_some_and(|s| s.get_box().display.is_none())
+            {
+                return false;
+            }
+            at = n.parent.map(|p| &self.nodes[p]);
+        }
+        true
     }
 
     /// Clear the focussed node
@@ -3544,5 +3576,51 @@ mod viewport_units_tests {
         doc.viewport_mut().window_size = (800, 400);
         doc.resolve(0.0);
         assert_eq!(height(&doc, body), 400.0);
+    }
+}
+
+#[cfg(test)]
+mod tab_order_tests {
+    use crate::{Attribute, BaseDocument, DocumentConfig, qual_name};
+    use blitz_traits::shell::{ColorScheme, Viewport};
+
+    /// Tab and Shift-Tab pass over what is not drawn: a button inside a
+    /// `display: none` element, and one that is `visibility: hidden`.
+    #[test]
+    fn tab_passes_over_what_is_not_rendered() {
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        doc.add_user_agent_stylesheet(crate::document::UserAgentStylesheet::parse(
+            "html, body, div { display: block; } .gone { display: none; } \
+             .unseen { visibility: hidden; }",
+        ));
+        let class = |c: &str| {
+            vec![Attribute {
+                name: crate::QualName::new(None, crate::ns!(), crate::LocalName::from("class")),
+                value: c.to_string(),
+            }]
+        };
+        let root_id = doc.root_node().id;
+        let mut mutator = doc.mutate();
+        let html = mutator.create_element(qual_name!("html"), vec![]);
+        let body = mutator.create_element(qual_name!("body"), vec![]);
+        let first = mutator.create_element(qual_name!("button"), vec![]);
+        let menu = mutator.create_element(qual_name!("div"), class("gone"));
+        let in_menu = mutator.create_element(qual_name!("button"), vec![]);
+        let unseen = mutator.create_element(qual_name!("button"), class("unseen"));
+        let last = mutator.create_element(qual_name!("button"), vec![]);
+        mutator.append_children(menu, &[in_menu]);
+        mutator.append_children(body, &[first, menu, unseen, last]);
+        mutator.append_children(html, &[body]);
+        mutator.append_children(root_id, &[html]);
+        drop(mutator);
+        doc.resolve(0.0);
+
+        doc.set_focus_to(first);
+        assert_eq!(doc.focus_next_node(), Some(last));
+        assert_eq!(doc.focus_prev_node(), Some(first));
+        assert_eq!(doc.focus_prev_node(), Some(last), "wrapping round");
     }
 }
