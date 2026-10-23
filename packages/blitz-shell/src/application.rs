@@ -85,9 +85,12 @@ impl<Rend: WindowRenderer> BlitzApplication<Rend> {
                             // TODO
                         }
                         accesskit_xplat::WindowEvent::ActionRequested(request) => {
-                            // A click is carried out as a click, through the
-                            // window's own events.
-                            if !window.accessibility_action(request) {
+                            // The embedder's first, if it set a hook for the
+                            // window; a click is carried out as a click,
+                            // through the window's own events.
+                            if !crate::accessibility::window_action(window_id, request)
+                                && !window.accessibility_action(request)
+                            {
                                 for event in window.accessibility_action_events(request) {
                                     window.handle_winit_event(event);
                                 }
