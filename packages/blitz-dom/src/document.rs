@@ -632,6 +632,25 @@ impl BaseDocument {
         self.nodes.get_mut(node_id)
     }
 
+    /// Selects all the text of the text input `node_id`, as Select All does,
+    /// so that the text committed next replaces it. Whether `node_id` is a
+    /// text input.
+    pub fn select_all_in_text_input(&mut self, node_id: NodeId) -> bool {
+        let Some(input) = self
+            .nodes
+            .get_mut(node_id)
+            .and_then(|node| node.element_data_mut())
+            .and_then(|el| el.text_input_data_mut())
+        else {
+            return false;
+        };
+        input
+            .editor
+            .driver(&mut self.font_ctx.lock().unwrap(), &mut self.layout_ctx)
+            .select_all();
+        true
+    }
+
     pub fn get_focussed_node_id(&self) -> Option<NodeId> {
         self.focus_node_id
             .or(self.try_root_element().map(|el| el.id))

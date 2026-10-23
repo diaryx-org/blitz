@@ -87,8 +87,10 @@ impl<Rend: WindowRenderer> BlitzApplication<Rend> {
                         accesskit_xplat::WindowEvent::ActionRequested(request) => {
                             // A click is carried out as a click, through the
                             // window's own events.
-                            for event in window.accessibility_action_events(request) {
-                                window.handle_winit_event(event);
+                            if !window.accessibility_action(request) {
+                                for event in window.accessibility_action_events(request) {
+                                    window.handle_winit_event(event);
+                                }
                             }
                         }
                     }

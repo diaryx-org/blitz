@@ -9,8 +9,8 @@ use anyrender::WindowRenderer;
 use blitz_dom::Document;
 use blitz_paint::paint_scene;
 use blitz_traits::events::{
-    BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent, MouseEventButton,
-    MouseEventButtons, PointerCoords, PointerDetails, UiEvent,
+    BlitzImeEvent, BlitzPointerEvent, BlitzPointerId, BlitzWheelDelta, BlitzWheelEvent,
+    MouseEventButton, MouseEventButtons, PointerCoords, PointerDetails, UiEvent,
 };
 use blitz_traits::shell::Viewport;
 use winit::dpi::{LogicalPosition, PhysicalInsets, PhysicalPosition};
@@ -371,14 +371,8 @@ impl<Rend: WindowRenderer> View<Rend> {
         if let Some(waker) = &self.waker {
             let cx = std::task::Context::from_waker(waker);
             if self.doc.poll(Some(cx)) {
-                #[cfg(feature = "accessibility")]
-                {
-                    let inner = self.doc.inner();
-                    if inner.has_changes() {
-                        self.accessibility.update_tree(&inner);
-                    }
-                }
-
+                // The accessibility tree is rebuilt by the redraw this asks
+                // for, once the changes are resolved.
                 self.request_redraw();
                 return true;
             }
@@ -431,6 +425,13 @@ impl<Rend: WindowRenderer> View<Rend> {
         }
 
         drop(inner);
+
+        // The tree assistive tech reads, as the document now stands: a change
+        // reaches the document through a poll, an event handler or the
+        // embedder, and every one is resolved here. A no-op while no
+        // assistive tech is listening.
+        #[cfg(feature = "accessibility")]
+        self.build_accessibility_tree();
 
         if !is_blocked && is_visible && is_animating {
             self.request_redraw();
@@ -599,6 +600,42 @@ impl<Rend: WindowRenderer> View<Rend> {
             )),
             _ => Vec::new(),
         }
+    }
+
+    /// Carries out what assistive tech asks of a node that is not something
+    /// a pointer does: `Focus` focuses it, and `SetValue` on a text input
+    /// focuses it and replaces its text, which the page hears as typing (an
+    /// `input` event). Whether the request was one of these and was carried
+    /// out; a click is [`View::accessibility_action_events`]'s.
+    #[cfg(feature = "accessibility")]
+    pub fn accessibility_action(&mut self, request: &accesskit::ActionRequest) -> bool {
+        let node = blitz_traits::node_id::NodeId::from_u64(request.target_node.0);
+        let done = match (&request.action, &request.data) {
+            (accesskit::Action::Focus, _) => {
+                let mut doc = self.doc.inner_mut();
+                doc.get_node(node).is_some_and(|n| n.is_element()) && {
+                    doc.set_focus_to(node);
+                    true
+                }
+            }
+            (accesskit::Action::SetValue, Some(accesskit::ActionData::Value(value))) => {
+                let selected = {
+                    let mut doc = self.doc.inner_mut();
+                    doc.set_focus_to(node);
+                    doc.get_focussed_node_id() == Some(node) && doc.select_all_in_text_input(node)
+                };
+                if selected {
+                    self.doc
+                        .handle_ui_event(UiEvent::Ime(BlitzImeEvent::Commit(value.to_string())));
+                }
+                selected
+            }
+            _ => false,
+        };
+        if done {
+            self.request_redraw();
+        }
+        done
     }
 
     #[cfg(target_arch = "wasm32")]
