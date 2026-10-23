@@ -141,6 +141,8 @@ impl EventLoop {
         );
 
         let event_loop_proxy = Arc::new(EventLoopProxy::new(android_app.create_waker()));
+        // leaf patch: wake for an `Ime` event the application sends.
+        crate::ime::set_waker(android_app.create_waker());
 
         let redraw_flag = SharedFlag::new();
 
@@ -246,9 +248,13 @@ impl EventLoop {
                     app.suspended(self.window_target());
                 },
                 MainEvent::Destroy => {
-                    // XXX: maybe exit mainloop to drop things before being
-                    // killed by the OS?
-                    warn!("TODO: forward onDestroy notification to application");
+                    // leaf patch: the activity is gone, so end the event loop
+                    // and drop the application with it. Left running, the
+                    // loop outlived its activity in a process Android keeps
+                    // for the next one, whose `android_main` then could not
+                    // make an event loop (`RecreationAttempt`) and never drew.
+                    debug!("App Destroyed - exiting the event loop");
+                    self.window_target.exit();
                 },
                 MainEvent::InsetsChanged { .. } => {
                     // XXX: how to forward this state to applications?
@@ -279,6 +285,13 @@ impl EventLoop {
             Err(err) => {
                 tracing::warn!("Failed to get input events iterator: {err:?}");
             },
+        }
+
+        // leaf patch: the input method's events, from the application's own
+        // connection to it (`ime.rs`).
+        for ime in crate::ime::take() {
+            let event = event::WindowEvent::Ime(ime);
+            app.window_event(&self.window_target, GLOBAL_WINDOW, event);
         }
 
         if self.window_target.event_loop_proxy.wake_up.swap(false, Ordering::Relaxed) {
@@ -572,7 +585,9 @@ impl EventLoop {
 
         timeout = if self.running
             && (self.pending_redraw
-                || self.window_target.event_loop_proxy.wake_up.load(Ordering::Relaxed))
+                || self.window_target.event_loop_proxy.wake_up.load(Ordering::Relaxed)
+                // leaf patch
+                || crate::ime::pending())
         {
             // If we already have work to do then we don't want to block on the next poll
             Some(Duration::ZERO)
@@ -605,7 +620,9 @@ impl EventLoop {
                     self.pending_redraw |= self.redraw_flag.get_and_reset();
                     if !self.running
                         || (!self.pending_redraw
-                            && !self.window_target.event_loop_proxy.wake_up.load(Ordering::Relaxed))
+                            && !self.window_target.event_loop_proxy.wake_up.load(Ordering::Relaxed)
+                            // leaf patch: an `Ime` event to deliver.
+                            && !crate::ime::pending())
                     {
                         return;
                     }

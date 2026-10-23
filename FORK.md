@@ -110,7 +110,14 @@ published crates (`apps/diaryx/patches` there):
 And the winit backends dioxus-native pins, patched, in `patches/`:
 `winit-appkit` (the Mac's text input client answers about the text round the
 caret: accents, the emoji picker, dictation) and `winit-uikit` (the UIScene
-lifecycle iOS 27 requires). They came from leaf's `patches/`.
+lifecycle iOS 27 requires), which came from leaf's `patches/`; and
+`winit-android` (`Ime` events an application's own input connection hands
+it, and an event loop that ends with its activity), from Diaryx's Android
+app.
+
+And in Blitz's text input, `Ime::DeleteSurrounding`, which was a `TODO`: the
+text either side of the selection deleted, as an input method asks before a
+correction or a recomposed word.
 
 And `anyrender_vello`, from Diaryx's app: a default frame latency of 2, not
 1, so that on Metal a frame does not wait for the one on screen before it can

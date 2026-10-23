@@ -73,6 +73,8 @@
 #![warn(clippy::exhaustive_enums)]
 
 mod event_loop;
+// leaf patch: `Ime` events from the application (`ime.rs`).
+pub mod ime;
 mod keycodes;
 
 use winit_core::event_loop::ActiveEventLoop as CoreActiveEventLoop;
