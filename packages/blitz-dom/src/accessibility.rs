@@ -15,10 +15,31 @@ impl BaseDocument {
         let mut labelled_by_nodes = Vec::new();
         let mut described_by_nodes = Vec::new();
 
+        // While a modal dialog is open, what is behind it is inert, and out
+        // of the tree, as a browser leaves it: only the dialog, and the
+        // ancestors that hold it, remain.
+        let modal = self.active_modal();
+        let mut modal_path = std::collections::HashSet::new();
+        let mut at = modal;
+        while let Some(id) = at {
+            modal_path.insert(id);
+            at = self.nodes[id].parent;
+        }
+        let mut in_modal = std::collections::HashSet::new();
+
         self.visit(|node_id, node| {
             // Whitespace between elements is layout, not content.
             let blank_text = node.is_text_node() && node.text_content().trim().is_empty();
+            let behind_modal = modal.is_some_and(|m| {
+                if node_id == m || node.parent.is_some_and(|p| in_modal.contains(&p)) {
+                    in_modal.insert(node_id);
+                    false
+                } else {
+                    !modal_path.contains(&node_id)
+                }
+            });
             if blank_text
+                || behind_modal
                 || node.is_hidden_from_accessibility_tree()
                 || node
                     .parent
@@ -86,6 +107,14 @@ impl BaseDocument {
             nodes.insert(node_id, (id, builder));
         }
 
+        // Focus left on a node that is not in the tree (hidden, or behind a
+        // modal) is the window's: AccessKit takes a focus it cannot find as
+        // a broken tree.
+        let focus = self
+            .focus_node_id
+            .filter(|id| nodes.contains_key(id))
+            .map_or(u64::MAX, |id| id.as_u64());
+
         let mut nodes: Vec<_> = nodes
             .into_iter()
             .map(|(_, (id, node))| (id, node))
@@ -97,8 +126,34 @@ impl BaseDocument {
             tree_id: TreeId::ROOT,
             nodes,
             tree: Some(tree),
-            focus: NodeId(self.focus_node_id.map(|id| id.as_u64()).unwrap_or(u64::MAX)),
+            focus: NodeId(focus),
         }
+    }
+
+    /// The modal dialog on top, if one is open: the last shown element, in
+    /// tree order, that is a `dialog` or `alertdialog` with
+    /// `aria-modal="true"`. One inside a hidden subtree is not open.
+    fn active_modal(&self) -> Option<BlitzDomNodeId> {
+        let mut hidden = std::collections::HashSet::new();
+        let mut modal = None;
+        self.visit(|node_id, node| {
+            if node.is_hidden_from_accessibility_tree()
+                || node.parent.is_some_and(|p| hidden.contains(&p))
+            {
+                hidden.insert(node_id);
+                return;
+            }
+            if let Some(element_data) = node.element_data()
+                && element_data.attr(local_name!("aria-modal")) == Some("true")
+                && matches!(
+                    element_data.attr(local_name!("role")),
+                    Some("dialog" | "alertdialog")
+                )
+            {
+                modal = Some(node_id);
+            }
+        });
+        modal
     }
 
     fn referenced_dom_ids_to_node_ids<'a>(
@@ -747,13 +802,9 @@ mod tests {
                 ("aria-orientation", "horizontal"),
             ]),
         );
-        let dialog = mutator.create_element(
-            qual_name!("div"),
-            at(&[("role", "dialog"), ("aria-modal", "true")]),
-        );
         let off = mutator.create_element(qual_name!("button"), at(&[("disabled", "")]));
         let rule = mutator.create_element(qual_name!("div"), at(&[("role", "separator")]));
-        mutator.append_children(html, &[check, switch, toggle, slider, dialog, off, rule]);
+        mutator.append_children(html, &[check, switch, toggle, slider, off, rule]);
         mutator.append_children(root_id, &[html]);
         drop(mutator);
         doc.resolve(0.0);
@@ -777,8 +828,94 @@ mod tests {
         assert_eq!(s.max_numeric_value(), Some(1.0));
         assert_eq!(s.value(), Some("40%"));
         assert_eq!(s.orientation(), Some(accesskit::Orientation::Horizontal));
-        assert!(find(dialog).is_modal());
         assert!(find(off).is_disabled());
         assert_eq!(find(rule).role(), Role::Splitter);
+    }
+
+    #[test]
+    fn a_modal_dialog_hides_what_is_behind_it() {
+        use crate::Attribute;
+
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        doc.add_user_agent_stylesheet(crate::document::UserAgentStylesheet::parse(
+            "html, body, div, button { display: block; } .gone { display: none; }",
+        ));
+        let root_id = doc.root_node().id;
+        let at = |pairs: &[(&str, &str)]| -> Vec<Attribute> {
+            pairs
+                .iter()
+                .map(|(n, v)| Attribute {
+                    name: crate::QualName::new(None, crate::ns!(), crate::LocalName::from(*n)),
+                    value: v.to_string(),
+                })
+                .collect()
+        };
+        let modal = [("role", "dialog"), ("aria-modal", "true")];
+        let mut mutator = doc.mutate();
+        let html = mutator.create_element(qual_name!("html"), vec![]);
+        let body = mutator.create_element(qual_name!("body"), vec![]);
+        let page = mutator.create_element(qual_name!("div"), vec![]);
+        let behind = mutator.create_element(qual_name!("button"), vec![]);
+        let behind_text = mutator.create_text_node("Behind");
+        // A closed template, kept mounted but not shown: not the modal.
+        let closed = mutator.create_element(
+            qual_name!("div"),
+            at(&[
+                ("role", "dialog"),
+                ("aria-modal", "true"),
+                ("class", "gone"),
+            ]),
+        );
+        let layer = mutator.create_element(qual_name!("div"), vec![]);
+        let scrim = mutator.create_element(qual_name!("button"), vec![]);
+        let sheet = mutator.create_element(qual_name!("div"), at(&modal));
+        let inside = mutator.create_element(qual_name!("button"), vec![]);
+        let inside_text = mutator.create_text_node("Inside");
+        mutator.append_children(behind, &[behind_text]);
+        mutator.append_children(page, &[behind]);
+        mutator.append_children(inside, &[inside_text]);
+        mutator.append_children(sheet, &[inside]);
+        mutator.append_children(layer, &[scrim, sheet]);
+        mutator.append_children(body, &[page, layer, closed]);
+        mutator.append_children(html, &[body]);
+        mutator.append_children(root_id, &[html]);
+        drop(mutator);
+        // Focus left behind the sheet.
+        doc.focus_node_id = Some(behind);
+        doc.resolve(0.0);
+
+        let update = doc.build_accessibility_tree();
+        let has = |id: crate::NodeId| update.nodes.iter().any(|(n, _)| *n == NodeId(id.as_u64()));
+        // The sheet, what is in it, and what holds it stay.
+        for id in [root_id, html, body, layer, sheet, inside, inside_text] {
+            assert!(has(id), "{id:?} should be in the tree");
+        }
+        // The page behind and the scrim beside it go.
+        for id in [page, behind, behind_text, scrim, closed] {
+            assert!(!has(id), "{id:?} should not be in the tree");
+        }
+        let (_, sheet_node) = update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == NodeId(sheet.as_u64()))
+            .unwrap();
+        assert!(sheet_node.is_modal());
+        // A focus behind the sheet is the window's, not a missing node.
+        assert_eq!(update.focus, NodeId(u64::MAX));
+
+        // Without the sheet, the page is back.
+        doc.mutate().remove_node(layer);
+        doc.resolve(0.0);
+        let update = doc.build_accessibility_tree();
+        assert!(
+            update
+                .nodes
+                .iter()
+                .any(|(n, _)| *n == NodeId(behind.as_u64()))
+        );
+        assert_eq!(update.focus, NodeId(behind.as_u64()));
     }
 }
