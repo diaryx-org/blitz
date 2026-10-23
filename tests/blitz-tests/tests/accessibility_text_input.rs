@@ -75,7 +75,10 @@ fn text_committed_over_a_selection_of_all_replaces_the_value() -> TestResult<()>
     verify_that!(input.value(), some(eq("Grace")))
 }
 
-fn find(nodes: &[(accesskit::NodeId, AccessKitNode)], role: Role) -> (accesskit::NodeId, AccessKitNode) {
+fn find(
+    nodes: &[(accesskit::NodeId, AccessKitNode)],
+    role: Role,
+) -> (accesskit::NodeId, AccessKitNode) {
     nodes
         .iter()
         .find(|(_, node)| node.role() == role)
