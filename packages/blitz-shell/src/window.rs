@@ -516,6 +516,30 @@ impl<Rend: WindowRenderer> View<Rend> {
         }
     }
 
+    /// Passes every accessibility tree built for this window from now on
+    /// through `hook`, which may change it before assistive tech sees it:
+    /// give a node a role, a value, text runs or a text selection the page's
+    /// markup cannot express, or replace its children. The tree arrives as
+    /// [`blitz_dom::BaseDocument::build_accessibility_tree`] made it, its node
+    /// ids the document's.
+    ///
+    /// What assistive tech then asks of such a node (`SetValue`,
+    /// `SetTextSelection`, ...) arrives as [`BlitzShellEvent::Accessibility`]
+    /// for the embedder to carry out.
+    #[cfg(feature = "accessibility")]
+    pub fn set_accessibility_tree_hook(
+        &mut self,
+        hook: impl FnMut(&blitz_dom::BaseDocument, &mut accesskit::TreeUpdate) + 'static,
+    ) {
+        self.accessibility.set_tree_hook(Some(Box::new(hook)));
+    }
+
+    /// Removes the hook [`View::set_accessibility_tree_hook`] set.
+    #[cfg(feature = "accessibility")]
+    pub fn clear_accessibility_tree_hook(&mut self) {
+        self.accessibility.set_tree_hook(None);
+    }
+
     #[cfg(feature = "accessibility")]
     pub fn build_accessibility_tree(&mut self) {
         let inner = self.doc.inner();
