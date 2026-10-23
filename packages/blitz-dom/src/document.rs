@@ -242,6 +242,13 @@ pub struct BaseDocument {
     /// last [`resolve`](Self::resolve), to be applied (coalesced into a single
     /// device rebuild) at the start of the next resolve.
     pub(crate) pending_device_changes: DeviceChanges,
+    /// Whether any style has resolved a viewport unit (vw/vh/etc) against any
+    /// device so far. Stylo records this on the [`Device`], and a fresh device
+    /// starts without it: a rebuild that left the viewport size alone (a change
+    /// of scale or color scheme) restyles none of those elements, so the next
+    /// device would not know of them, and a later resize would leave them
+    /// sized for the old viewport. Kept here across rebuilds instead.
+    pub(crate) styles_used_viewport_units: bool,
     /// Strategy for Stylo's style traversal during `resolve`.
     pub(crate) style_threading: StyleThreading,
     /// Whether incremental layout is enabled for this document. When disabled,
@@ -482,6 +489,7 @@ impl BaseDocument {
             viewport,
             media_type,
             pending_device_changes: DeviceChanges::empty(),
+            styles_used_viewport_units: false,
             style_threading: config.style_threading,
             incremental_layout: config.incremental.unwrap_or(true),
             subdocument_depth: config.subdocument_depth,
@@ -2233,7 +2241,8 @@ impl BaseDocument {
 
         let old_device = self.stylist.device();
         let viewport_size_changed = old_device.au_viewport_size() != device.au_viewport_size();
-        let styles_use_viewport_units = old_device.used_viewport_size();
+        self.styles_used_viewport_units |= old_device.used_viewport_size();
+        let styles_use_viewport_units = self.styles_used_viewport_units;
 
         let origins = {
             let guard = &self.guard;
@@ -3459,5 +3468,81 @@ mod font_face_override_tests {
             "registered family should report the CSS-declared name, \
              not the font file's internal `name` table entry",
         );
+    }
+}
+
+#[cfg(test)]
+mod viewport_units_tests {
+    use super::*;
+    use crate::{Attribute, qual_name};
+    use blitz_traits::shell::ColorScheme;
+
+    /// `<html><body style="display:block;margin:0;height:100vh">`, laid out in a window
+    /// `w`×`h` CSS pixels at `scale`.
+    fn make_doc(w: u32, h: u32, scale: f32) -> (BaseDocument, NodeId) {
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(
+                (w as f32 * scale) as u32,
+                (h as f32 * scale) as u32,
+                scale,
+                ColorScheme::Light,
+            )),
+            ..Default::default()
+        });
+        let root_id = doc.root_node().id;
+        let mut mutator = doc.mutate();
+        let html = mutator.create_element(qual_name!("html"), vec![]);
+        let body = mutator.create_element(
+            qual_name!("body"),
+            vec![Attribute {
+                name: qual_name!("style"),
+                value: "display:block;margin:0;height:100vh".to_string(),
+            }],
+        );
+        mutator.append_children(html, &[body]);
+        mutator.append_children(root_id, &[html]);
+        drop(mutator);
+        doc.resolve(0.0);
+        (doc, body)
+    }
+
+    fn height(doc: &BaseDocument, node: NodeId) -> f32 {
+        doc.nodes[node].final_layout().size.height
+    }
+
+    /// A window moved to a screen of another scale: winit reports the new
+    /// backing size first, at the old scale (the page seen half as tall),
+    /// then the new scale, with a frame between.
+    #[test]
+    fn vh_follows_a_move_to_another_scale() {
+        let (mut doc, body) = make_doc(800, 600, 2.0);
+        assert_eq!(height(&doc, body), 600.0);
+
+        doc.viewport_mut().window_size = (800, 600);
+        doc.resolve(0.0);
+        assert_eq!(height(&doc, body), 300.0);
+
+        doc.viewport_mut().set_hidpi_scale(1.0);
+        doc.resolve(0.0);
+        assert_eq!(height(&doc, body), 600.0);
+    }
+
+    /// A rebuild of the device that leaves the CSS viewport alone (a change
+    /// of scale alone) must not lose track of styles that use viewport
+    /// units: the next resize has to resolve them again.
+    #[test]
+    fn vh_follows_a_resize_after_a_scale_change() {
+        let (mut doc, body) = make_doc(800, 600, 2.0);
+
+        let mut v = doc.viewport_mut();
+        v.window_size = (800, 600);
+        v.set_hidpi_scale(1.0);
+        drop(v);
+        doc.resolve(0.0);
+        assert_eq!(height(&doc, body), 600.0);
+
+        doc.viewport_mut().window_size = (800, 400);
+        doc.resolve(0.0);
+        assert_eq!(height(&doc, body), 400.0);
     }
 }
