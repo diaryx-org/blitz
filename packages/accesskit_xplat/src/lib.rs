@@ -137,6 +137,14 @@ use raw_window_handle::RawWindowHandle;
 
 mod platform_impl;
 
+/// The JNI crate [`set_android_host_view`] takes its view in.
+#[cfg(all(feature = "accesskit_android", target_os = "android"))]
+pub use accesskit_android::jni;
+/// The view that hosts the accessibility tree on Android, for an activity
+/// other than GameActivity (a NativeActivity, say).
+#[cfg(all(feature = "accesskit_android", target_os = "android"))]
+pub use platform_impl::set_host_view as set_android_host_view;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum WindowEvent {
     InitialTreeRequested,
