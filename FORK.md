@@ -31,6 +31,9 @@ winit-uikit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # The renderer, patched (patches/anyrender_vello/PATCH.md), with the `vello`
 # feature: alone, as its manifest takes its siblings from crates.io
 anyrender_vello = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+# On Android, with accessibility: AccessKit's adapter, with a fix it has not
+# released (patches/accesskit_android/PATCH.md)
+accesskit_android = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # Or, with the `vello-hybrid` feature, the four that draw emoji, backdrop
 # filters and color matrices with it (patches/*/PATCH.md)
 anyrender_vello_hybrid = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
@@ -87,6 +90,15 @@ page:
   `View::accessibility_action`: `SetValue` focuses the input, selects all of
   it and commits the new text, which the page hears as an `input` event.
 
+- On Android, the tree at all: blitz-shell's `accessibility` feature turns
+  on `accesskit_xplat`'s Android adapter, which was off, so every Android
+  app had the null one. The adapter injects AccessKit's delegate into a
+  host view, GameActivity's surface view or one the embedder names with
+  `accesskit_xplat::set_android_host_view` (a NativeActivity has no view to
+  offer), and fails soft where it found neither. Found in Diaryx's Android
+  app, where TalkBack reads and presses its screens with these and the
+  `winit-android` and `accesskit_android` patches below.
+
 Events and layout, found by diaryx-org/unit's gallery:
 
 - A press focuses what it lands on when that can be focused, and a click goes
@@ -112,8 +124,13 @@ And the winit backends dioxus-native pins, patched, in `patches/`:
 caret: accents, the emoji picker, dictation) and `winit-uikit` (the UIScene
 lifecycle iOS 27 requires), which came from leaf's `patches/`; and
 `winit-android` (`Ime` events an application's own input connection hands
-it, and an event loop that ends with its activity), from Diaryx's Android
+it, an event loop that ends with its activity, and hovers left to the
+window's views, for TalkBack's explore-by-touch), from Diaryx's Android
 app.
+
+And `accesskit_android`, the adapter `accesskit_xplat` takes on Android, with
+AccessKit's unreleased fix for a crash on the first letter typed into an
+empty field (AccessKit/accesskit#813).
 
 And in Blitz's text input, `Ime::DeleteSurrounding`, which was a `TODO`: the
 text either side of the selection deleted, as an input method asks before a

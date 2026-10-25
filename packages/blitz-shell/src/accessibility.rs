@@ -5,9 +5,10 @@ use blitz_dom::BaseDocument;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(not(target_os = "android"))]
+use winit::raw_window_handle::HasWindowHandle;
 use winit::{
     event::WindowEvent,
-    raw_window_handle::HasWindowHandle,
     window::{Window, WindowId},
 };
 
