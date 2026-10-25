@@ -18,6 +18,10 @@ crate by name in the repository.
   corrections, swipe or voice typing. An application can give the input
   method a connection of its own (a Java `View` over the activity, with
   `onCreateInputConnection`), but had no way to hand winit what it heard.
+- **A hover never reached a view.** winit marked every motion event
+  handled, hovers too, which it does nothing with; so Android gave none to
+  the window's views. TalkBack's explore-by-touch sends a finger as hovers,
+  and an accessibility delegate on a view (AccessKit's) answers them.
 - **The event loop outlived its activity.** `MainEvent::Destroy` was a
   `TODO`: the loop went on after the activity was gone, in a process Android
   keeps for the next activity. When the app was launched again, Android
@@ -31,12 +35,14 @@ crate by name in the repository.
   thread and wake the event loop, which delivers it to the window as
   `WindowEvent::Ime` in the next iteration, after the input queue's events.
   A wake with an event queued is not ignored as a spurious one.
+- A hover (`HoverEnter`, `HoverMove`, `HoverExit`) is unhandled, so it goes
+  on to the window's views, as it does in an activity without native input.
 - On `MainEvent::Destroy`, the event loop exits, so `run_app` returns and the
   application is dropped. An application ends its process there, or keeps
   it and makes nothing more of winit.
 
 An application that never calls `ime::send` gets the old behaviour, except
-that the event loop now ends with its activity.
+that the event loop now ends with its activity, and its views see hovers.
 
 ## Upstream
 

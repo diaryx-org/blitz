@@ -349,6 +349,14 @@ impl EventLoop {
                     MotionAction::Move | MotionAction::Cancel => {
                         Some(Box::new(motion_event.pointers()))
                     },
+                    // leaf patch: a hover, unhandled, goes on to the window's
+                    // views, as it would without a NativeActivity. TalkBack's
+                    // explore-by-touch sends a finger as hovers, which an
+                    // accessibility delegate on a view answers.
+                    MotionAction::HoverEnter | MotionAction::HoverMove | MotionAction::HoverExit => {
+                        input_status = InputStatus::Unhandled;
+                        None
+                    },
                     // TODO mouse events
                     _ => None,
                 };
