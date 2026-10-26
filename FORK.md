@@ -168,6 +168,13 @@ beside the standard `url(#id)`, which Stylo's Servo build cannot parse
 (`blitz-paint/src/filters.rs`). Its `feGaussianBlur`, `feColorMatrix` and
 `feOffset` are read as one chain, enough for blurred shapes that merge.
 
+And fonts for the text inside SVG images, which usvg sets from a font
+database of its own holding only the system's fonts: `add_svg_fonts` adds a
+host's, and a generic family the database lacks falls back to the first of
+them. In a browser, which lists no system fonts, an SVG's text drew as
+nothing before; found in leaf's web host, where a Mermaid diagram's labels
+are SVG text.
+
 And a package upstream does not have, `blitz-tui` (on the `tui` branch until
 it merges into `leaf`): Blitz's laid-out page painted into a terminal's
 character cells, a sibling of `blitz-paint` and `blitz-shell` that keeps the

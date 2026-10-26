@@ -124,6 +124,8 @@ pub use style::stylist::RegisterCustomPropertyResult;
 pub type SelectorList = selectors::SelectorList<style::selector_parser::SelectorImpl>;
 pub use events::{EventDriver, EventHandler, NoopEventHandler};
 pub use html::{DummyHtmlParserProvider, HtmlParserProvider};
+#[cfg(feature = "svg")]
+pub use util::add_svg_fonts;
 pub use util::{Point, decode_font_bytes};
 
 /// Convenience builder for the one-font case: produces a [`FontContext`] with

@@ -40,15 +40,72 @@ pub fn decode_font_bytes(bytes: &[u8]) -> Cow<'_, [u8]> {
 }
 
 #[cfg(feature = "svg")]
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, RwLock};
 #[cfg(feature = "svg")]
 use usvg::fontdb;
+/// The fonts the text inside SVG images is set in: the system's, and any a
+/// host adds with [`add_svg_fonts`]. Swapped whole when fonts are added, so
+/// an image already parsing keeps the database it started with.
 #[cfg(feature = "svg")]
-pub(crate) static FONT_DB: LazyLock<Arc<fontdb::Database>> = LazyLock::new(|| {
+static FONT_DB: LazyLock<RwLock<Arc<fontdb::Database>>> = LazyLock::new(|| {
     let mut db = fontdb::Database::new();
     db.load_system_fonts();
-    Arc::new(db)
+    RwLock::new(Arc::new(db))
 });
+
+#[cfg(feature = "svg")]
+fn svg_font_db() -> Arc<fontdb::Database> {
+    Arc::clone(&FONT_DB.read().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Add fonts (TrueType or OpenType files) for the text inside SVG images,
+/// for SVGs parsed from now on.
+///
+/// SVG text is set by usvg from a font database of its own, which holds the
+/// system's fonts. Where there are none — in a browser, on `wasm32` — an SVG's
+/// text draws as nothing until a host adds some here. A generic family
+/// (`serif`, `sans-serif`, `monospace`, `cursive`, `fantasy`) whose face the
+/// database does not have falls back to the first face added.
+#[cfg(feature = "svg")]
+pub fn add_svg_fonts(fonts: impl IntoIterator<Item = Vec<u8>>) {
+    let mut slot = FONT_DB.write().unwrap_or_else(|e| e.into_inner());
+    let mut db = fontdb::Database::clone(&slot);
+    let first = db.len();
+    for font in fonts {
+        db.load_font_data(font);
+    }
+    let Some(fallback) = db
+        .faces()
+        .nth(first)
+        .and_then(|face| face.families.first())
+        .map(|(name, _)| name.clone())
+    else {
+        return;
+    };
+    let missing = |db: &fontdb::Database, generic: fontdb::Family| {
+        let query = fontdb::Query {
+            families: &[generic],
+            ..Default::default()
+        };
+        db.query(&query).is_none()
+    };
+    if missing(&db, fontdb::Family::Serif) {
+        db.set_serif_family(fallback.clone());
+    }
+    if missing(&db, fontdb::Family::SansSerif) {
+        db.set_sans_serif_family(fallback.clone());
+    }
+    if missing(&db, fontdb::Family::Monospace) {
+        db.set_monospace_family(fallback.clone());
+    }
+    if missing(&db, fontdb::Family::Cursive) {
+        db.set_cursive_family(fallback.clone());
+    }
+    if missing(&db, fontdb::Family::Fantasy) {
+        db.set_fantasy_family(fallback);
+    }
+    *slot = Arc::new(db);
+}
 
 /// Which kind of CSS image layer list (`background-image` or `mask-image`) to
 /// flush from style to dedicated storage on the node.
@@ -157,7 +214,7 @@ pub fn walk_tree(indent: usize, node: &Node) {
 #[cfg(feature = "svg")]
 pub(crate) fn parse_svg_image(source: &[u8]) -> Result<crate::node::SvgImageData, usvg::Error> {
     let options = usvg::Options {
-        fontdb: Arc::clone(&*FONT_DB),
+        fontdb: svg_font_db(),
         ..Default::default()
     };
     crate::node::SvgImageData::from_data(source, &options)
