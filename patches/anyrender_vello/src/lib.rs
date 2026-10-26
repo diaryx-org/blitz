@@ -3,11 +3,13 @@
 #[cfg(not(target_arch = "wasm32"))]
 mod image_renderer;
 mod scene;
+mod software;
 mod window_renderer;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use image_renderer::VelloImageRenderer;
 pub use scene::VelloScenePainter;
+pub use software::VelloWindowScenePainter;
 pub use wgpu_context::DeviceHandle;
 pub use window_renderer::{VelloRendererOptions, VelloWindowRenderer};
 

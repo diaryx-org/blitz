@@ -33,6 +33,31 @@ and one more drawable's memory. `src/window_renderer.rs`, marked
 anyrender_vello_hybrid, the renderer for the iOS Simulator, has the same
 default of 1 and is not patched.
 
+## No GPU
+
+`VelloWindowRenderer::resume` called `.expect` on the surface, the
+`DeviceHandle` (adapter and device), the `SurfaceRenderer` and Vello's
+renderer. With no GPU to draw with, which an agent testing Diaryx in a Linux
+virtual machine found, the app panicked as its window opened.
+
+Each of these now falls back to the CPU: the renderer holds a
+`VelloCpuWindowRenderer` (anyrender_vello_cpu, through softbuffer) for the
+window from then on, through `suspend` and `resume`, and says why on stderr
+once. Its `ScenePainter` is now `VelloWindowScenePainter`, an enum of Vello's
+painter and vello_cpu's (`src/software.rs`); callers that name it as
+`<VelloWindowRenderer as WindowRenderer>::ScenePainter`, as dioxus-native and
+leaf-dioxus do, see no difference. `is_software()` says which one draws.
+Custom wgpu textures cannot be registered in the fallback.
+
+The fallback is in this crate, not in Blitz, because dioxus-native chooses the
+renderer type at compile time from its features: blitz-shell is handed a
+`VelloWindowRenderer` and cannot swap it. On the web the error is now the
+panic's message, and there is no fallback.
+
+This part goes when anyrender_vello falls back or reports the error itself,
+so that dioxus-native or the app can choose; it is the change to propose
+upstream (DioxusLabs/anyrender).
+
 ## When it goes
 
 When dioxus-native lets the frame latency be set (a field on its
