@@ -28,7 +28,7 @@ repository = "https://github.com/dioxuslabs/anyrender"
 resolver = "2"
 
 [features]
-log_frame_times = ["debug_timer/enable"]
+log_frame_times = ["debug_timer/enable", "anyrender_vello_cpu/log_frame_times"]
 
 [lib]
 name = "anyrender_vello"
@@ -36,6 +36,10 @@ path = "src/lib.rs"
 
 [dependencies.anyrender]
 version = "0.14.0"
+
+[dependencies.anyrender_vello_cpu]
+version = "0.18.0"
+features = ["softbuffer_window_renderer", "multithreading"]
 
 [dependencies.debug_timer]
 version = "0.1.1"

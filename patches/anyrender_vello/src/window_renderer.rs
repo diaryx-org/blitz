@@ -20,20 +20,34 @@ use wgpu_context::{
     TextureConfiguration, WGPUContext,
 };
 
+use crate::software::{SoftwareRenderer, SoftwareRendererOptions, VelloWindowScenePainter};
 use crate::{DEFAULT_THREADS, VelloScenePainter};
 
 /// Drive the wgpu init future. On wasm32 we spawn it onto the JS microtask
 /// queue (blocking is not allowed). On native we drive it inline with
 /// `pollster::block_on` — there's no ambient async runtime to spawn onto, and
 /// `on_ready` then fires before `resume` returns.
+///
+/// PATCH(diaryx): `on_failure` runs if the future fails; natively, inline
+/// before `resume` returns, as `on_ready` would.
 #[cfg(target_arch = "wasm32")]
-fn spawn_init<F: Future<Output = ()> + 'static>(f: F) {
-    wasm_bindgen_futures::spawn_local(f);
+fn spawn_init<F: Future<Output = Result<(), String>> + 'static>(
+    f: F,
+    _on_failure: impl FnOnce(String),
+) {
+    // No fallback on the web: the error is the panic's message.
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Err(error) = f.await {
+            panic!("{error}");
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn spawn_init<F: Future<Output = ()>>(f: F) {
-    pollster::block_on(f);
+fn spawn_init<F: Future<Output = Result<(), String>>>(f: F, on_failure: impl FnOnce(String)) {
+    if let Err(error) = pollster::block_on(f) {
+        on_failure(error);
+    }
 }
 
 struct ActiveRenderState {
@@ -54,6 +68,10 @@ enum RenderState {
         receiver: oneshot::Receiver<InitOutput>,
     },
     Active(ActiveRenderState),
+    /// PATCH(diaryx): wgpu gave no adapter, device or surface, so the window
+    /// draws on the CPU. Kept through `suspend`, so a later `resume` does not
+    /// ask wgpu again.
+    Software(Box<SoftwareRenderer>),
 }
 
 #[derive(Clone)]
@@ -191,6 +209,29 @@ impl VelloWindowRenderer {
         }
     }
 
+    /// PATCH(diaryx): whether the window draws on the CPU, because wgpu gave
+    /// no adapter, device or surface for it.
+    pub fn is_software(&self) -> bool {
+        matches!(self.render_state, RenderState::Software(_))
+    }
+
+    /// PATCH(diaryx): draw on the CPU from now on, saying why on stderr.
+    fn fall_back_to_software(
+        &mut self,
+        error: String,
+        window_handle: Arc<dyn WindowHandle>,
+        width: u32,
+        height: u32,
+        on_ready: impl FnOnce() + 'static,
+    ) {
+        eprintln!("anyrender_vello: no GPU to draw with ({error}); drawing on the CPU instead");
+        let mut software = Box::new(SoftwareRenderer::with_options(
+            SoftwareRendererOptions::new().base_color(self.config.base_color),
+        ));
+        software.resume(window_handle, width, height, on_ready);
+        self.render_state = RenderState::Software(software);
+    }
+
     pub fn current_device_handle(&self) -> Option<&DeviceHandle> {
         match &self.render_state {
             RenderState::Active(active) => Some(&active.render_surface.device_handle),
@@ -204,8 +245,12 @@ impl RenderContext for VelloWindowRenderer {
         &mut self,
         resource: Box<dyn std::any::Any>,
     ) -> Result<ResourceId, anyrender::RegisterResourceError> {
-        let RenderState::Active(active) = &mut self.render_state else {
-            return Err(RegisterResourceErrorKind::NotActive.into());
+        let active = match &mut self.render_state {
+            RenderState::Active(active) => active,
+            RenderState::Software(software) => {
+                return software.try_register_custom_resource(resource);
+            }
+            _ => return Err(RegisterResourceErrorKind::NotActive.into()),
         };
 
         if let Ok(texture) = resource.downcast::<Texture>() {
@@ -219,8 +264,10 @@ impl RenderContext for VelloWindowRenderer {
     }
 
     fn unregister_resource(&mut self, resource_id: ResourceId) {
-        let RenderState::Active(active) = &mut self.render_state else {
-            return;
+        let active = match &mut self.render_state {
+            RenderState::Active(active) => active,
+            RenderState::Software(software) => return software.unregister_resource(resource_id),
+            _ => return,
         };
 
         if let Some(handle) = self.texture_handles.remove(&resource_id) {
@@ -233,6 +280,7 @@ impl RenderContext for VelloWindowRenderer {
             RenderState::Active(active) => {
                 Some(Box::new(active.render_surface.device_handle.clone()))
             }
+            RenderState::Software(software) => software.renderer_specific_context(),
             RenderState::Pending { .. } => None,
             RenderState::Suspended => None,
         }
@@ -247,12 +295,16 @@ fn build_wgpu_context(config: &VelloRendererOptions) -> WGPUContext {
 
 impl WindowRenderer for VelloWindowRenderer {
     type ScenePainter<'a>
-        = VelloScenePainter<'a, 'a>
+        = VelloWindowScenePainter<'a>
     where
         Self: 'a;
 
     fn is_active(&self) -> bool {
-        matches!(self.render_state, RenderState::Active { .. })
+        match &self.render_state {
+            RenderState::Active { .. } => true,
+            RenderState::Software(software) => software.is_active(),
+            _ => false,
+        }
     }
 
     fn is_pending(&self) -> bool {
@@ -270,6 +322,13 @@ impl WindowRenderer for VelloWindowRenderer {
         // construction). Calling while `Pending` or `Active` is a state-machine bug
         // in the embedder: it would orphan the in-flight init's `WGPUContext` and
         // pay for a fresh adapter+device init on the fallback path below.
+        if let RenderState::Software(software) = &mut self.render_state
+            && !software.is_active()
+        {
+            self.window_handle = Some(window_handle.clone());
+            software.resume(window_handle, width, height, on_ready);
+            return;
+        }
         if !matches!(self.render_state, RenderState::Suspended) {
             // #[cfg(feature = "tracing")]
             // tracing::warn!("WindowRenderer::resume called from non-Suspended state");
@@ -280,10 +339,16 @@ impl WindowRenderer for VelloWindowRenderer {
         self.render_state = RenderState::Pending { receiver };
         self.window_handle = Some(window_handle.clone());
 
-        let surface = self
-            .wgpu_context
-            .create_surface(window_handle)
-            .expect("Error creating surface");
+        // PATCH(diaryx): no surface, adapter or device falls back to the CPU
+        // (`fall_back_to_software`), where it used to panic.
+        let surface = match self.wgpu_context.create_surface(window_handle.clone()) {
+            Ok(surface) => surface,
+            Err(error) => {
+                let error = format!("Error creating surface: {error}");
+                self.fall_back_to_software(error, window_handle, width, height, on_ready);
+                return;
+            }
+        };
         let instance = self.wgpu_context.instance.clone();
         let extra_features = self.wgpu_context.extra_features();
         let override_limits = self.wgpu_context.override_limits();
@@ -309,7 +374,11 @@ impl WindowRenderer for VelloWindowRenderer {
             .wgpu_context
             .find_compatible_device_handle(Some(&surface));
 
-        spawn_init(async move {
+        // Natively the init runs inline, so a failure falls back before
+        // `resume` returns; the `on_ready` it has not used goes with it.
+        let on_ready = std::rc::Rc::new(std::cell::Cell::new(Some(on_ready)));
+        let on_ready_for_init = on_ready.clone();
+        let init = async move {
             let device_handle = match existing_device_handle {
                 Some(device_handle) => device_handle,
                 None => DeviceHandle::new_from_compatible_surface(
@@ -319,7 +388,7 @@ impl WindowRenderer for VelloWindowRenderer {
                     override_limits,
                 )
                 .await
-                .expect("Error creating DeviceHandle"),
+                .map_err(|error| format!("Error creating DeviceHandle: {error}"))?,
             };
 
             let adapter = &device_handle.adapter;
@@ -349,7 +418,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 composite_alpha_mode = alpha_modes
                     .first()
                     .copied()
-                    .expect("Surface didn't report any alpha modes");
+                    .ok_or("Surface didn't report any alpha modes")?;
             }
 
             #[cfg(not(target_vendor = "apple"))]
@@ -384,7 +453,7 @@ impl WindowRenderer for VelloWindowRenderer {
                 texture_config,
                 device_handle,
             )
-            .expect("Error creating SurfaceRenderer");
+            .map_err(|error| format!("Error creating SurfaceRenderer: {error}"))?;
 
             let renderer = VelloRenderer::new(
                 render_surface.device(),
@@ -395,7 +464,7 @@ impl WindowRenderer for VelloWindowRenderer {
                     pipeline_cache,
                 },
             )
-            .unwrap();
+            .map_err(|error| format!("Error creating the Vello renderer: {error}"))?;
 
             let _ = sender.send(InitOutput {
                 active: ActiveRenderState {
@@ -403,13 +472,25 @@ impl WindowRenderer for VelloWindowRenderer {
                     render_surface,
                 },
             });
-            on_ready();
-        });
+            if let Some(on_ready) = on_ready_for_init.take() {
+                on_ready();
+            }
+            Ok(())
+        };
+        let mut failure = None;
+        spawn_init(init, |error| failure = Some(error));
+
+        if let Some(error) = failure
+            && let Some(on_ready) = on_ready.take()
+        {
+            self.fall_back_to_software(error, window_handle, width, height, on_ready);
+        }
     }
 
     fn complete_resume(&mut self) -> bool {
         match &mut self.render_state {
             RenderState::Active { .. } => true,
+            RenderState::Software(software) => software.complete_resume(),
             RenderState::Suspended => false,
             RenderState::Pending { receiver } => match receiver.try_recv() {
                 Ok(Some(InitOutput { active })) => {
@@ -424,6 +505,10 @@ impl WindowRenderer for VelloWindowRenderer {
     }
 
     fn suspend(&mut self) {
+        if let RenderState::Software(software) = &mut self.render_state {
+            software.suspend();
+            return;
+        }
         if let RenderState::Active(active) = &mut self.render_state {
             // Unregister all textures on suspend
             for (_id, handle) in self.texture_handles.drain() {
@@ -434,14 +519,21 @@ impl WindowRenderer for VelloWindowRenderer {
     }
 
     fn set_size(&mut self, width: u32, height: u32) {
-        if let RenderState::Active(active) = &mut self.render_state {
-            active.render_surface.resize(width, height);
-        };
+        match &mut self.render_state {
+            RenderState::Active(active) => active.render_surface.resize(width, height),
+            RenderState::Software(software) => software.set_size(width, height),
+            _ => {}
+        }
     }
 
     fn render<F: FnOnce(&mut Self::ScenePainter<'_>)>(&mut self, draw_fn: F) {
-        let RenderState::Active(state) = &mut self.render_state else {
-            return;
+        let state = match &mut self.render_state {
+            RenderState::Active(state) => state,
+            RenderState::Software(software) => {
+                return software
+                    .render(|painter| draw_fn(&mut VelloWindowScenePainter::Cpu(painter)));
+            }
+            _ => return,
         };
 
         let render_surface = &mut state.render_surface;
@@ -449,12 +541,12 @@ impl WindowRenderer for VelloWindowRenderer {
         debug_timer!(timer, feature = "log_frame_times");
 
         // Regenerate the vello scene
-        draw_fn(&mut VelloScenePainter {
+        draw_fn(&mut VelloWindowScenePainter::Gpu(VelloScenePainter {
             inner: &mut self.scene,
             renderer: Some(&mut state.renderer),
             device_handle: Some(&render_surface.device_handle),
             texture_handles: Some(&mut self.texture_handles),
-        });
+        }));
         timer.record_time("cmd");
 
         let Ok(texture_view) = render_surface.target_texture_view() else {

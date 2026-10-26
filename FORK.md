@@ -141,6 +141,11 @@ And `anyrender_vello`, from Diaryx's app: a default frame latency of 2, not
 draw (about 22 ms a frame on an iPhone, before). dioxus-native gives no way
 to set it.
 
+And `anyrender_vello` again: with no GPU to draw with (no adapter, device or
+surface from wgpu, as in a Linux virtual machine), the window draws on the
+CPU through vello_cpu and softbuffer instead of the app panicking. Blitz
+cannot choose the renderer itself: dioxus-native fixes it at compile time.
+
 And `anyrender_vello_hybrid` and `glifo`, so that Blitz's default renderer
 draws a bitmap glyph, which every Apple Color Emoji is: from glifo's atlas,
 with `png` on, at any size and in synthesised italic. Before, an emoji drew
