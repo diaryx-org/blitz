@@ -17,6 +17,7 @@ mod dioxus_renderer;
 mod event_handlers;
 mod hooks;
 mod link_handler;
+mod windows;
 
 #[cfg(feature = "prelude")]
 pub mod prelude;
@@ -64,13 +65,13 @@ pub use blitz_dom::{FontContext, Widget, build_single_font_ctx};
 pub use config::Config;
 pub use event_handlers::WinitEventHandlerId;
 pub use hooks::{use_back_button, use_window_event};
+pub use windows::open_window;
 pub use winit;
 pub use winit::dpi::{LogicalSize, PhysicalSize};
 pub use winit::window::WindowAttributes;
 
 use blitz_shell::{BlitzShellEvent, BlitzShellProxy, WindowConfig, create_default_event_loop};
 use dioxus_core::{ComponentFunction, Element, VirtualDom, consume_context, use_hook};
-use link_handler::DioxusNativeNavigationProvider;
 use std::any::Any;
 use std::sync::Arc;
 use winit::{
@@ -176,68 +177,55 @@ pub fn launch_cfg_with_props<P: Clone + 'static, M: 'static>(
 
     // Build the vdom first; the net provider, document, and other window-bound
     // contexts are attached below once the event-loop proxy exists.
-    let mut vdom = VirtualDom::new_with_props(app, props);
+    let vdom = VirtualDom::new_with_props(app, props);
 
-    for context in contexts {
-        vdom.insert_any_root_context(context());
-    }
-
+    // PATCH(diaryx): the root contexts, net provider, HTML parser, fonts and
+    // renderer options are kept in a template (`windows.rs`), which makes
+    // this window and any `open_window` asks for.
     #[cfg(all(feature = "net", not(target_arch = "wasm32")))]
-    let net_provider = {
+    let (inner_net_provider, net_provider) = {
         let net_waker = Some(Arc::new(proxy.clone()) as _);
         let inner_net_provider = Arc::new(blitz_net::Provider::new(net_waker));
-        vdom.provide_root_context(Arc::clone(&inner_net_provider));
 
-        Arc::new(DioxusNativeNetProvider::with_inner(
+        let net_provider = Arc::new(DioxusNativeNetProvider::with_inner(
             proxy.clone(),
-            inner_net_provider as _,
-        )) as Arc<dyn NetProvider>
+            Arc::clone(&inner_net_provider) as _,
+        )) as Arc<dyn NetProvider>;
+        (inner_net_provider, net_provider)
     };
 
     #[cfg(any(not(feature = "net"), target_arch = "wasm32"))]
     let net_provider = DioxusNativeNetProvider::shared(proxy.clone());
 
-    vdom.provide_root_context(Arc::clone(&net_provider));
-
     #[cfg(feature = "html")]
-    let html_parser_provider = {
-        let html_parser = Arc::new(blitz_html::HtmlProvider) as _;
-        vdom.provide_root_context(Arc::clone(&html_parser));
-        Some(html_parser)
-    };
+    let html_parser_provider = Some(Arc::new(blitz_html::HtmlProvider) as _);
     #[cfg(not(feature = "html"))]
     let html_parser_provider = None;
 
-    let navigation_provider = Some(Arc::new(DioxusNativeNavigationProvider) as _);
+    let template = windows::Template {
+        contexts,
+        #[cfg(all(feature = "net", not(target_arch = "wasm32")))]
+        inner_net_provider,
+        net_provider,
+        html_parser_provider,
+        font_ctx: config.font_ctx,
+        renderer: RendererOptions {
+            base_color: config.base_color,
+            alpha_mode: config.alpha_mode,
+            #[cfg(any(feature = "vello", feature = "vello-hybrid"))]
+            features,
+            #[cfg(any(feature = "vello", feature = "vello-hybrid"))]
+            limits,
+        },
+    };
 
     // Create document + window from the baked virtualdom
-    let doc = DioxusDocument::new(
-        vdom,
-        DocumentConfig {
-            net_provider: Some(net_provider),
-            html_parser_provider,
-            navigation_provider,
-            font_ctx: config.font_ctx,
-            ..Default::default()
-        },
-    );
-    #[cfg(any(feature = "vello", feature = "vello-hybrid"))]
-    let renderer = DioxusNativeWindowRenderer::with_options(RendererOptions {
-        base_color: config.base_color,
-        alpha_mode: config.alpha_mode,
-        features,
-        limits,
-    });
-    #[cfg(not(any(feature = "vello", feature = "vello-hybrid")))]
-    let renderer = DioxusNativeWindowRenderer::with_options(RendererOptions {
-        base_color: config.base_color,
-        alpha_mode: config.alpha_mode,
-    });
-    let config =
-        WindowConfig::with_attributes(Box::new(doc) as _, renderer, config.window_attributes);
+    let config = template.window(vdom, config.window_attributes);
 
     // Create application
-    let application = DioxusNativeApplication::new(proxy, event_queue, config);
+    windows::set_proxy(proxy.clone());
+    let application =
+        DioxusNativeApplication::new(proxy, event_queue, config).with_template(template);
 
     // Run event loop
     event_loop.run_app(application).unwrap();
