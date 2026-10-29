@@ -45,6 +45,10 @@ pub struct DioxusNativeApplication {
     /// set by `launch_cfg_with_props`, and an application made without it
     /// opens no more windows.
     template: Option<Template>,
+    /// PATCH(diaryx): whether surfaces may be made now: from
+    /// `can_create_surfaces` until `destroy_surfaces`. A window asked for
+    /// outside that waits for the next `can_create_surfaces`.
+    surfaces: bool,
 }
 
 impl DioxusNativeApplication {
@@ -58,6 +62,7 @@ impl DioxusNativeApplication {
             inner: BlitzApplication::new(proxy, event_queue),
             event_handlers: Rc::new(WindowEventHandlers::default()),
             template: None,
+            surfaces: false,
         }
     }
 
@@ -123,6 +128,26 @@ impl DioxusNativeApplication {
         self.inner.add_window(window_config);
     }
 
+    /// PATCH(diaryx): make the windows `open_window` asked for, when
+    /// surfaces may be made; else they stay queued for `can_create_surfaces`.
+    fn open_windows(&mut self, event_loop: &dyn ActiveEventLoop) {
+        if !self.surfaces || self.template.is_none() {
+            return;
+        }
+        for opening in take_openings() {
+            let Some(template) = &self.template else {
+                break;
+            };
+            let config = template.window((opening.vdom)(), opening.attributes);
+            let window_id = self.init_window(event_loop, config);
+            // The first window is resumed with the rest in
+            // `can_create_surfaces`; one made after has to be here.
+            if let Some(window) = self.inner.windows.get_mut(&window_id) {
+                window.resume();
+            }
+        }
+    }
+
     fn handle_dioxus_native_event(
         &mut self,
         event_loop: &dyn ActiveEventLoop,
@@ -155,20 +180,7 @@ impl DioxusNativeApplication {
                 _ => {}
             },
 
-            DioxusNativeEvent::OpenWindows => {
-                for opening in take_openings() {
-                    let Some(template) = &self.template else {
-                        break;
-                    };
-                    let config = template.window((opening.vdom)(), opening.attributes);
-                    let window_id = self.init_window(event_loop, config);
-                    // The first window is resumed with the rest in
-                    // `can_create_surfaces`; one made after has to be here.
-                    if let Some(window) = self.inner.windows.get_mut(&window_id) {
-                        window.resume();
-                    }
-                }
-            }
+            DioxusNativeEvent::OpenWindows => self.open_windows(event_loop),
 
             DioxusNativeEvent::CreateHeadElement {
                 name,
@@ -209,6 +221,7 @@ impl ApplicationHandler for DioxusNativeApplication {
     }
 
     fn destroy_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.surfaces = false;
         self.inner.destroy_surfaces(event_loop);
     }
 
@@ -225,6 +238,8 @@ impl ApplicationHandler for DioxusNativeApplication {
         }
 
         self.inner.can_create_surfaces(event_loop);
+        self.surfaces = true;
+        self.open_windows(event_loop);
     }
 
     fn new_events(&mut self, event_loop: &dyn ActiveEventLoop, cause: StartCause) {

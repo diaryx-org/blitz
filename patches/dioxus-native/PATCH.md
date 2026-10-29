@@ -44,6 +44,11 @@ root contexts, providers, fonts and renderer options.
   `OpenWindows` handled. `DioxusNativeApplication::new` is unchanged; the
   template is set with `with_template`, which only launch calls.
 
+A window asked for while surfaces may not be made (between
+`destroy_surfaces` and the next `can_create_surfaces`, as on Android while
+the native surface is gone) stays queued and is made with the next
+`can_create_surfaces`, as the first window waits for it.
+
 Closing a window drops it and ends the app only when it was the last, as
 blitz-shell already did. Every window's `VirtualDom` runs on the event
 loop's thread, so state shared between windows can live in a
