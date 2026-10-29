@@ -47,8 +47,14 @@ ones `leaf` changes: they depend on each other by path, so one taken from
 crates.io beside them is a second copy of it, and the build fails on two
 `blitz-traits`. Cargo warns of a patch the graph does not use; drop it.
 
-Not `dioxus-native` or `dioxus-native-dom`: this repository's copies are an
-older line (0.7) than the published 0.8 alphas, which stay crates.io's.
+Not `dioxus-native-dom`, nor this repository's `packages/dioxus-native`:
+those are an older line (0.7) than the published 0.8 alphas. The published
+dioxus-native is patched here, in `patches/dioxus-native` (its `PATCH.md`),
+for an app that opens more than one window:
+
+```toml
+dioxus-native = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+```
 
 ## Keeping it
 
@@ -131,6 +137,11 @@ app.
 And `accesskit_android`, the adapter `accesskit_xplat` takes on Android, with
 AccessKit's unreleased fix for a crash on the first letter typed into an
 empty field (AccessKit/accesskit#813).
+
+And `dioxus-native` itself, in `patches/dioxus-native`: `open_window`, so
+an app opens more windows than the one it was launched in, each running a
+`VirtualDom` of its own. From Diaryx's desktop app, where a screen is a
+window.
 
 And in Blitz's text input, `Ime::DeleteSurrounding`, which was a `TODO`: the
 text either side of the selection deleted, as an input method asks before a

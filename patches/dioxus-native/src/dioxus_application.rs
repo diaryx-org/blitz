@@ -1,0 +1,272 @@
+use blitz_shell::{BlitzApplication, BlitzShellProxy, View};
+use dioxus_core::{ScopeId, provide_context};
+use dioxus_history::{History, MemoryHistory};
+use std::rc::Rc;
+use std::sync::Arc;
+use winit::application::ApplicationHandler;
+use winit::event::{StartCause, WindowEvent};
+use winit::event_loop::ActiveEventLoop;
+use winit::window::WindowId;
+
+#[cfg(target_os = "macos")]
+use winit::platform::macos::ApplicationHandlerExtMacOS;
+
+use crate::DioxusNativeWindowRenderer;
+use crate::event_handlers::WindowEventHandlers;
+use crate::windows::{Template, take_openings};
+use crate::{BlitzShellEvent, DioxusDocument, WindowConfig, contexts::DioxusNativeDocument};
+
+/// Dioxus-native specific event type
+pub enum DioxusNativeEvent {
+    /// A hotreload event, basically telling us to update our templates.
+    #[cfg(all(feature = "hot-reload", debug_assertions))]
+    DevserverEvent(dioxus_devtools::DevserverMsg),
+
+    /// Create a new head element from the Link and Title elements
+    ///
+    /// todo(jon): these should probabkly be synchronous somehow
+    CreateHeadElement {
+        window: WindowId,
+        name: String,
+        attributes: Vec<(String, String)>,
+        contents: Option<String>,
+    },
+
+    /// PATCH(diaryx): make the windows [`open_window`](crate::open_window)
+    /// has asked for since this was last handled.
+    OpenWindows,
+}
+
+pub struct DioxusNativeApplication {
+    pending_window: Option<WindowConfig<DioxusNativeWindowRenderer>>,
+    inner: BlitzApplication<DioxusNativeWindowRenderer>,
+    event_handlers: Rc<WindowEventHandlers>,
+    /// PATCH(diaryx): what a window `open_window` asks for is made with:
+    /// set by `launch_cfg_with_props`, and an application made without it
+    /// opens no more windows.
+    template: Option<Template>,
+    /// PATCH(diaryx): whether surfaces may be made now: from
+    /// `can_create_surfaces` until `destroy_surfaces`. A window asked for
+    /// outside that waits for the next `can_create_surfaces`.
+    surfaces: bool,
+}
+
+impl DioxusNativeApplication {
+    pub fn new(
+        proxy: BlitzShellProxy,
+        event_queue: std::sync::mpsc::Receiver<BlitzShellEvent>,
+        config: WindowConfig<DioxusNativeWindowRenderer>,
+    ) -> Self {
+        Self {
+            pending_window: Some(config),
+            inner: BlitzApplication::new(proxy, event_queue),
+            event_handlers: Rc::new(WindowEventHandlers::default()),
+            template: None,
+            surfaces: false,
+        }
+    }
+
+    pub(crate) fn with_template(mut self, template: Template) -> Self {
+        self.template = Some(template);
+        self
+    }
+
+    /// PATCH(diaryx): make the window, give its `VirtualDom` the contexts
+    /// dioxus-native gives every window, build it, and keep it. Taken out of
+    /// `can_create_surfaces`, where the first window was made, so that
+    /// `OpenWindows` makes the others the same way.
+    fn init_window(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        config: WindowConfig<DioxusNativeWindowRenderer>,
+    ) -> WindowId {
+        let mut window = View::init(config, event_loop, &self.inner.proxy);
+        let winit_window = Arc::clone(&window.window);
+        let renderer = window.renderer.clone();
+        let window_id = window.window_id();
+        let doc = window.downcast_doc_mut::<DioxusDocument>();
+
+        doc.vdom.in_scope(ScopeId::ROOT, || {
+            let shared: Rc<dyn dioxus_document::Document> = Rc::new(DioxusNativeDocument::new(
+                self.inner.proxy.clone(),
+                window_id,
+            ));
+            provide_context(shared);
+            provide_context(self.event_handlers.clone());
+        });
+
+        // Add shell provider
+        let shell_provider = doc.inner.borrow().shell_provider.clone();
+        doc.vdom
+            .in_scope(ScopeId::ROOT, move || provide_context(shell_provider));
+
+        // Add history
+        let history_provider: Rc<dyn History> = Rc::new(MemoryHistory::default());
+        doc.vdom
+            .in_scope(ScopeId::ROOT, move || provide_context(history_provider));
+
+        // Add renderer
+        doc.vdom
+            .in_scope(ScopeId::ROOT, move || provide_context(renderer));
+
+        // Add winit window
+        doc.vdom
+            .in_scope(ScopeId::ROOT, move || provide_context(winit_window));
+
+        // Queue rebuild
+        doc.initial_build();
+
+        // And then request redraw
+        window.request_redraw();
+
+        // todo(jon): we should actually mess with the pending windows instead of passing along the contexts
+        self.inner.windows.insert(window_id, window);
+        window_id
+    }
+
+    pub fn add_window(&mut self, window_config: WindowConfig<DioxusNativeWindowRenderer>) {
+        self.inner.add_window(window_config);
+    }
+
+    /// PATCH(diaryx): make the windows `open_window` asked for, when
+    /// surfaces may be made; else they stay queued for `can_create_surfaces`.
+    fn open_windows(&mut self, event_loop: &dyn ActiveEventLoop) {
+        if !self.surfaces || self.template.is_none() {
+            return;
+        }
+        for opening in take_openings() {
+            let Some(template) = &self.template else {
+                break;
+            };
+            let config = template.window((opening.vdom)(), opening.attributes);
+            let window_id = self.init_window(event_loop, config);
+            // The first window is resumed with the rest in
+            // `can_create_surfaces`; one made after has to be here.
+            if let Some(window) = self.inner.windows.get_mut(&window_id) {
+                window.resume();
+            }
+        }
+    }
+
+    fn handle_dioxus_native_event(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        event: &DioxusNativeEvent,
+    ) {
+        match event {
+            #[cfg(all(feature = "hot-reload", debug_assertions))]
+            DioxusNativeEvent::DevserverEvent(event) => match event {
+                dioxus_devtools::DevserverMsg::HotReload(hotreload_message) => {
+                    for window in self.inner.windows.values_mut() {
+                        let doc = window.downcast_doc_mut::<DioxusDocument>();
+
+                        // Apply changes to vdom
+                        dioxus_devtools::apply_changes(&doc.vdom, hotreload_message);
+
+                        // Reload changed assets
+                        for asset_path in &hotreload_message.assets {
+                            if let Some(url) = asset_path.to_str() {
+                                doc.inner.borrow_mut().reload_resource_by_href(url);
+                            }
+                        }
+
+                        window.poll();
+                    }
+                }
+                dioxus_devtools::DevserverMsg::Shutdown => event_loop.exit(),
+                dioxus_devtools::DevserverMsg::FullReloadStart => {}
+                dioxus_devtools::DevserverMsg::FullReloadFailed => {}
+                dioxus_devtools::DevserverMsg::FullReloadCommand => {}
+                _ => {}
+            },
+
+            DioxusNativeEvent::OpenWindows => self.open_windows(event_loop),
+
+            DioxusNativeEvent::CreateHeadElement {
+                name,
+                attributes,
+                contents,
+                window,
+            } => {
+                if let Some(window) = self.inner.windows.get_mut(window) {
+                    let doc = window.downcast_doc_mut::<DioxusDocument>();
+                    doc.create_head_element(name, attributes, contents);
+                    window.poll();
+                }
+            }
+
+            // Suppress unused variable warning
+            #[cfg(not(all(feature = "hot-reload", debug_assertions)))]
+            #[allow(unreachable_patterns)]
+            _ => {
+                let _ = event_loop;
+                let _ = event;
+            }
+        }
+    }
+}
+
+impl ApplicationHandler for DioxusNativeApplication {
+    #[cfg(target_os = "macos")]
+    fn macos_handler(&mut self) -> Option<&mut dyn ApplicationHandlerExtMacOS> {
+        self.inner.macos_handler()
+    }
+
+    fn resumed(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.inner.resumed(event_loop);
+    }
+
+    fn suspended(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.inner.suspended(event_loop);
+    }
+
+    fn destroy_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.surfaces = false;
+        self.inner.destroy_surfaces(event_loop);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
+        self.inner.about_to_wait(event_loop);
+    }
+
+    fn can_create_surfaces(&mut self, event_loop: &dyn ActiveEventLoop) {
+        #[cfg(feature = "tracing")]
+        tracing::debug!("Injecting document provider into all windows");
+
+        if let Some(config) = self.pending_window.take() {
+            self.init_window(event_loop, config);
+        }
+
+        self.inner.can_create_surfaces(event_loop);
+        self.surfaces = true;
+        self.open_windows(event_loop);
+    }
+
+    fn new_events(&mut self, event_loop: &dyn ActiveEventLoop, cause: StartCause) {
+        self.inner.new_events(event_loop, cause);
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &dyn ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        self.event_handlers
+            .apply_event(window_id, &event, event_loop);
+        self.inner.window_event(event_loop, window_id, event);
+    }
+
+    fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
+        while let Ok(event) = self.inner.event_queue.try_recv() {
+            match event {
+                BlitzShellEvent::Embedder(event) => {
+                    if let Some(event) = event.downcast_ref::<DioxusNativeEvent>() {
+                        self.handle_dioxus_native_event(event_loop, event);
+                    }
+                }
+                event => self.inner.handle_blitz_shell_event(event_loop, event),
+            }
+        }
+    }
+}
