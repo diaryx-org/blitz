@@ -569,11 +569,7 @@ impl NetHandler for ResourceHandler<ImageHandler> {
 
 impl ImageHandler {
     fn parse(&self, bytes: Bytes) -> Result<Resource, String> {
-        let image_err = match image::ImageReader::new(Cursor::new(&bytes))
-            .with_guessed_format()
-            .expect("IO errors impossible with Cursor")
-            .decode()
-        {
+        let image_err = match decode_oriented(&bytes) {
             Ok(image) => {
                 let width = image.width();
                 let height = image.height();
@@ -606,9 +602,84 @@ impl ImageHandler {
     }
 }
 
+/// A raster image, turned as its EXIF orientation says, as a browser draws
+/// it by default (`image-orientation: from-image`). A phone's camera writes
+/// its sensor's pixels and the way up in the orientation: decoded without
+/// it, a portrait photo lies on its side.
+fn decode_oriented(bytes: &[u8]) -> image::ImageResult<image::DynamicImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .expect("IO errors impossible with Cursor")
+        .into_decoder()?;
+    let orientation = decoder.orientation().ok();
+    let mut image = image::DynamicImage::from_decoder(decoder)?;
+    if let Some(o) = orientation {
+        image.apply_orientation(o);
+    }
+    Ok(image)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A JPEG of `w` by `h`, red on its left half and blue on its right,
+    /// with an EXIF orientation of `orientation`, as a phone's camera writes
+    /// one held upright: its sensor's pixels, and the way up.
+    fn jpeg_turned(w: u32, h: u32, orientation: u16) -> Vec<u8> {
+        let img = image::RgbImage::from_fn(w, h, |x, _| {
+            if x < w / 2 {
+                image::Rgb([255, 0, 0])
+            } else {
+                image::Rgb([0, 0, 255])
+            }
+        });
+        let mut jpeg = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+            .unwrap();
+        // APP1: "Exif", a little-endian TIFF header, and one IFD of one entry,
+        // the orientation (0x0112), a SHORT.
+        let mut tiff = b"II*\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+        tiff.extend_from_slice(&orientation.to_le_bytes());
+        tiff.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+        let mut app1 = b"Exif\0\0".to_vec();
+        app1.extend_from_slice(&tiff);
+        let len = (app1.len() + 2) as u16;
+        let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        out.extend_from_slice(&len.to_be_bytes());
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(&jpeg[2..]);
+        out
+    }
+
+    #[test]
+    fn a_photo_is_turned_the_way_its_orientation_says() {
+        // 6: the camera was turned a quarter clockwise; the picture is drawn
+        // turned back, its left half on top.
+        let image = decode_oriented(&jpeg_turned(32, 16, 6))
+            .unwrap()
+            .into_rgb8();
+        assert_eq!(image.dimensions(), (16, 32));
+        let top = image.get_pixel(8, 4);
+        let bottom = image.get_pixel(8, 28);
+        assert!(
+            top[0] > 200 && top[2] < 60,
+            "the top is the red half: {top:?}"
+        );
+        assert!(
+            bottom[2] > 200 && bottom[0] < 60,
+            "the bottom is the blue half: {bottom:?}"
+        );
+    }
+
+    #[test]
+    fn a_photo_without_an_orientation_is_as_it_was_taken() {
+        let image = decode_oriented(&jpeg_turned(32, 16, 1)).unwrap();
+        assert_eq!((image.width(), image.height()), (32, 16));
+    }
+
     use parley::fontique::FontStyle as Fq;
     use style::values::specified::Angle;
 

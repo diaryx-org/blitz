@@ -31,6 +31,9 @@ winit-uikit = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # The renderer, patched (patches/anyrender_vello/PATCH.md), with the `vello`
 # feature: alone, as its manifest takes its siblings from crates.io
 anyrender_vello = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+# The SVG renderer blitz-paint draws an SVG <img> with, patched
+# (patches/anyrender_svg/PATCH.md): alone, as anyrender_vello
+anyrender_svg = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # On Android, with accessibility: AccessKit's adapter, with a fix it has not
 # released (patches/accesskit_android/PATCH.md)
 accesskit_android = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
@@ -63,7 +66,7 @@ dioxus-native = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 - **A new Blitz release** that dioxus-native moves to: `leaf` is rebased onto
   its tag. A change upstream now has is dropped then. The winit backends in
   `patches/` move with it, to the winit that release pins, and
-  `anyrender_vello`, `anyrender_vello_hybrid`, `glifo`, `vello_gpu` and
+  `anyrender_vello`, `anyrender_svg`, `anyrender_vello_hybrid`, `glifo`, `vello_gpu` and
   `vello_gpu_shaders` to the anyrender and vello it takes; each goes when its fix is in that release.
 - **A winit fix** goes upstream to winit, not Blitz (each `PATCH.md` says
   where it stands).
@@ -156,6 +159,13 @@ And `anyrender_vello` again: with no GPU to draw with (no adapter, device or
 surface from wgpu, as in a Linux virtual machine), the window draws on the
 CPU through vello_cpu and softbuffer instead of the app panicking. Blitz
 cannot choose the renderer itself: dioxus-native fixes it at compile time.
+
+And `anyrender_svg`, from Diaryx's app: an SVG's raster image is decoded
+once while its tree lives, not on every frame, and turned the way its EXIF
+orientation says. A photo in leaf's Reflow view, drawn inside a piece's
+SVG, had been decoded and uploaded again each frame, and lay on its side.
+And in `blitz-dom`, a raster `<img>` is turned by its EXIF orientation too,
+as a browser does by default.
 
 And `anyrender_vello_hybrid` and `glifo`, so that Blitz's default renderer
 draws a bitmap glyph, which every Apple Color Emoji is: from glifo's atlas,

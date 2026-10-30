@@ -111,3 +111,7 @@ web-time = { workspace = true }
 # to prevent debug builds from panicking.
 [target.'cfg(any(target_vendor = "apple"))'.dependencies]
 objc2 = { version = "0.6", features = ["disable-encoding-assertions"] }
+
+[dev-dependencies]
+# A photo to decode in the tests (`net.rs`): the formats are the app's to choose.
+image = { workspace = true, features = ["jpeg"] }
