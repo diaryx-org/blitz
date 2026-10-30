@@ -140,6 +140,10 @@ enum TransientBuf<'a> {
     Gpu(&'a Buffer),
 }
 
+/// PATCH(diaryx): the stages whose shaders keep wgpu's runtime checks (see
+/// `create_compute_pipeline`), by the label `shaders.rs` gives them.
+const CHECKED_STAGES: &[&str] = &["vello.tile_alloc", "vello.fine_msaa8", "vello.fine_msaa16"];
+
 impl WgpuEngine {
     pub fn new(use_cpu: bool, pipeline_cache: Option<PipelineCache>) -> Self {
         Self {
@@ -843,6 +847,19 @@ impl WgpuEngine {
         entries: Vec<wgpu::BindGroupLayoutEntry>,
         cache: Option<&PipelineCache>,
     ) -> WgpuShader {
+        // PATCH(diaryx): bounds checks for the stages that index out of
+        // bounds, unchecked for the rest. `tile_alloc` and the MSAA `fine`
+        // variants read `sh_*_count[ix - 1u]` inside a `select(.., ix > 0u)`,
+        // which evaluates both arms, so thread 0 reads workgroup memory at
+        // index 0xffffffff. Newer GPUs tolerated it; an iPhone 12 Pro (A14)
+        // page-faults in `tile_alloc` and garbles text in `fine_msaa16`
+        // (PATCH.md). Checks on every stage cost 3.2 ms a frame on an iPhone
+        // 15 Pro, so only these have them.
+        let checks = if CHECKED_STAGES.contains(&label) {
+            wgpu::ShaderRuntimeChecks::checked()
+        } else {
+            wgpu::ShaderRuntimeChecks::unchecked()
+        };
         // SAFETY: We only call this with trusted shaders (written by Vello developers)
         let shader_module = unsafe {
             device.create_shader_module_trusted(
@@ -850,7 +867,7 @@ impl WgpuEngine {
                     label: Some(label),
                     source: wgpu::ShaderSource::Wgsl(wgsl),
                 },
-                wgpu::ShaderRuntimeChecks::unchecked(),
+                checks,
             )
         };
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
