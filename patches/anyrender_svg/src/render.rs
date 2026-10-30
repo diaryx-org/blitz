@@ -116,15 +116,15 @@ pub(crate) fn render_group<S: PaintScene, F: FnMut(&mut S, &usvg::Node)>(
                     | usvg::ImageKind::PNG(_)
                     | usvg::ImageKind::GIF(_)
                     | usvg::ImageKind::WEBP(_) => {
+                        // PATCH(diaryx): decoded once, and turned (PATCH.md).
                         #[cfg(feature = "image")]
                         {
-                            let Ok(decoded_image) = util::decode_raw_raster_image(img.kind())
-                            else {
+                            let Some((image, fit)) = util::raster_image(img) else {
                                 error_handler(scene, node);
                                 continue;
                             };
-                            let image = util::into_image(decoded_image, img.rendering_mode());
-                            let image_ts = global_transform * util::to_affine(&img.abs_transform());
+                            let image_ts =
+                                global_transform * util::to_affine(&img.abs_transform()) * fit;
                             scene.draw_image(image.as_ref(), image_ts);
                         }
 
