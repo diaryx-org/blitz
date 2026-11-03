@@ -225,26 +225,14 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
         if dx.abs() > 2.0 || dy.abs() > 2.0 {
             match event.id {
                 BlitzPointerId::Mouse | BlitzPointerId::Pen => {
-                    if let Some(mousedown_node_id) = doc.mousedown_node_id {
-                        let node = &doc.nodes[mousedown_node_id];
-                        if let Some(style) = node.primary_styles() {
-                            let user_select = style.clone_user_select();
-                            if user_select == UserSelect::None {
-                                // Do nothing. Continue with rest of function
-                            } else if user_select == UserSelect::Auto {
-                                if let Some(parent) = node.parent {
-                                    let node = &doc.nodes[parent];
-                                    if let Some(style) = node.primary_styles() {
-                                        let user_select = style.clone_user_select();
-                                        if user_select == UserSelect::None {
-                                            // Do nothing. Continue with rest of function
-                                        } else {
-                                            doc.drag_mode = DragMode::Selecting;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    // Only a press whose default action anchored a selection
+                    // drags one: not one a handler cancelled, whose drag would
+                    // otherwise carry an earlier press's anchor to the pointer.
+                    if doc.press_selects
+                        && let Some(mousedown_node_id) = doc.mousedown_node_id
+                        && doc.used_user_select(mousedown_node_id) != UserSelect::None
+                    {
+                        doc.drag_mode = DragMode::Selecting;
                     }
                 }
                 BlitzPointerId::Finger(_) => {
@@ -501,9 +489,14 @@ pub(crate) fn handle_pointerdown(
     match click_target {
         ClickTarget::Disabled => (),
         ClickTarget::SelectableText => {
-            // Handle text selection for non-input elements
-            if let Some((inline_root_id, byte_offset)) = doc.find_text_position(x, y) {
+            // Handle text selection for non-input elements. Text that may not
+            // be selected anchors nothing, as a press outside any text.
+            let position = (doc.used_user_select(actual_target) != UserSelect::None)
+                .then(|| doc.find_text_position(x, y))
+                .flatten();
+            if let Some((inline_root_id, byte_offset)) = position {
                 doc.set_text_selection(inline_root_id, byte_offset, inline_root_id, byte_offset);
+                doc.press_selects = true;
                 doc.shell_provider.request_redraw();
             } else {
                 doc.clear_text_selection();

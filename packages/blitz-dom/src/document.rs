@@ -318,6 +318,11 @@ pub struct BaseDocument {
     pub(crate) click_count: u16,
     /// Whether we're currently in a text selection drag (moved 2px+ from mousedown)
     pub(crate) drag_mode: DragMode,
+    /// Whether the press under way may drag a text selection: set only where its
+    /// `pointerdown` default action anchored one. A press whose `pointerdown` or
+    /// `mousedown` was cancelled, or that landed on `user-select: none`, leaves it
+    /// unset, so its drag cannot extend an earlier press's anchor.
+    pub(crate) press_selects: bool,
     /// The scrollbar thumb currently under the pointer, if any
     pub(crate) hovered_scrollbar: Option<crate::node::ScrollbarRef>,
     /// When each scroll container's overlay scrollbars were last shown
@@ -537,6 +542,7 @@ impl BaseDocument {
             mousedown_position: taffy::Point::ZERO,
             click_count: 0,
             drag_mode: DragMode::None,
+            press_selects: false,
             hovered_scrollbar: None,
             scrollbar_activity: HashMap::new(),
             scroll_animation: ScrollAnimationState::None,
@@ -1823,6 +1829,38 @@ impl BaseDocument {
     pub fn set_mousedown_node_id(&mut self, node_id: Option<NodeId>) {
         self.mousedown_node_id = node_id.and_then(|id| self.nearest_non_anonymous_ancestor(id));
     }
+
+    /// A new press begins, before any handler hears of it: the last press's drag
+    /// is over, and this one may drag a selection only once its default action
+    /// says so (`handle_pointerdown`).
+    pub(crate) fn begin_press(&mut self) {
+        self.drag_mode = DragMode::None;
+        self.press_selects = false;
+    }
+
+    /// A node's used `user-select`, as CSS UI 4 defines it: `auto` is its
+    /// parent's used value where that is `none` or `all` (and `text` at the
+    /// root), so a `none` holds for every descendant that does not say
+    /// otherwise.
+    pub(crate) fn used_user_select(&self, node_id: NodeId) -> UserSelect {
+        let mut current = Some(node_id);
+        while let Some(id) = current {
+            let Some(node) = self.get_node(id) else {
+                break;
+            };
+            if let Some(style) = node.primary_styles() {
+                match style.clone_user_select() {
+                    UserSelect::Auto => {}
+                    // `contain` is an editing host's; text inputs select on
+                    // their own, so outside one it reads as `text`.
+                    UserSelect::Contain => return UserSelect::Text,
+                    value => return value,
+                }
+            }
+            current = node.parent;
+        }
+        UserSelect::Text
+    }
     pub fn set_focus_to(&mut self, focus_node_id: NodeId) -> bool {
         let Some(focus_node_id) = self.nearest_non_anonymous_ancestor(focus_node_id) else {
             return false;
@@ -2334,7 +2372,7 @@ impl BaseDocument {
         }
 
         let style = node.primary_styles()?;
-        let user_select = style.clone_user_select();
+        let user_select = self.used_user_select(node.id);
         let keyword = style.clone_cursor().keyword;
 
         // Return cursor from style if it is non-auto

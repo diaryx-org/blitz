@@ -188,6 +188,7 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
                 let mut doc = self.doc.inner_mut();
                 doc.active_node();
                 doc.set_mousedown_node_id(hover_node_id);
+                doc.begin_press();
             }
             UiEvent::PointerUp(event) => {
                 hover_node_id = self.handle_pointer_move(event);

@@ -117,6 +117,17 @@ Events and layout, found by diaryx-org/unit's gallery:
   to the nearest element the press and the release share.
 - A node removed under `display: none` is forgotten by its layout parent.
 
+From Diaryx, where leaf's editor cancels `mousedown` to keep its own caret
+and selection, and the app's labels are `user-select: none`:
+
+- A press whose `pointerdown` or `mousedown` was cancelled starts no text
+  selection: its drag no longer carries an earlier press's anchor to the
+  pointer, across everything between them.
+- `user-select` is read as its used value, `none` holding for every
+  descendant that does not say otherwise (upstream looked one parent up). A
+  press on such text anchors nothing, a drag from it selects nothing, and
+  the cursor over it is the arrow, not the text cursor.
+
 From Diaryx's iOS and Mac app, which carried them as patches of the
 published crates (`apps/diaryx/patches` there):
 
