@@ -110,6 +110,15 @@ page:
   offer), and fails soft where it found neither. Found in Diaryx's Android
   app, where TalkBack reads and presses its screens with these and the
   `winit-android` and `accesskit_android` patches below.
+- On the web, the tree at all: `accesskit_xplat` had no web adapter, so a
+  page drawn on a canvas had the null one and assistive tech saw one box.
+  `platform_impl/web.rs` mirrors the tree as transparent elements laid over
+  the canvas at each node's bounds, with its ARIA role, name and states; the
+  canvas is an `application` that owns them, with the focused node as its
+  `aria-activedescendant`, so the keyboard stays with winit. A click assistive
+  tech sends to an element comes back as the node's `Click`, or `Focus` where
+  it has no click. Found in Diaryx's web build, checked with headless
+  Chromium's accessibility tree.
 
 Events and layout, found by diaryx-org/unit's gallery:
 

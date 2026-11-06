@@ -122,6 +122,8 @@ dependencies = [
  "accesskit_windows",
  "android-activity",
  "raw-window-handle",
+ "wasm-bindgen",
+ "web-sys",
  "winit-core",
 ]
 
