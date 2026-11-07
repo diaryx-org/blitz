@@ -44,10 +44,11 @@ const NODE_ATTR: &str = "data-accesskit-node";
 const ROOT_CLASS: &str = "accesskit-mirror";
 
 /// How the mirror is kept out of sight and out of the pointer's way, once for
-/// the page.
+/// the page. Nothing is clipped: a node with no bounds (the shell's window)
+/// is an element of no size, and what it holds is still where it is drawn.
 const STYLE: &str = ".accesskit-mirror, .accesskit-mirror * {\
     position: absolute; box-sizing: border-box; margin: 0; padding: 0; border: 0;\
-    overflow: hidden; color: transparent; background: transparent;\
+    overflow: visible; color: transparent; background: transparent;\
     pointer-events: none; user-select: none; -webkit-user-select: none;\
     caret-color: transparent; outline: none; white-space: pre; font-size: 1px;\
 }\
@@ -201,7 +202,10 @@ impl State {
         }
         for (id, node) in update.nodes {
             match mirror.nodes.get_mut(&id) {
-                Some(m) if tag_for(node.role()) == m.element.tag_name().to_ascii_lowercase() => {
+                // A node keeps its element while its role does: what one
+                // role writes (a slider's value, a field's text) is not
+                // another's to clear.
+                Some(m) if m.node.role() == node.role() => {
                     if m.node != node {
                         describe(&m.element, &node, Some(&m.node));
                         m.node = node;
@@ -304,8 +308,19 @@ impl State {
             let Some(child_element) = mirror.nodes.get(&child).map(|c| c.element.clone()) else {
                 continue;
             };
+            // A run is its label's text, already written: kept in the
+            // mirror, out of the page.
             if mirror.nodes[&child].node.role() == Role::TextRun {
                 reached.insert(child);
+                if child_element.parent_element().is_some() {
+                    if at
+                        .as_ref()
+                        .is_some_and(|e| e == AsRef::<Element>::as_ref(&child_element))
+                    {
+                        at = child_element.next_element_sibling();
+                    }
+                    child_element.remove();
+                }
                 continue;
             }
             match &at {
