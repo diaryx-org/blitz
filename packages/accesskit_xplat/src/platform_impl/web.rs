@@ -207,7 +207,7 @@ impl State {
                 // another's to clear.
                 Some(m) if m.node.role() == node.role() => {
                     if m.node != node {
-                        describe(&m.element, &node, Some(&m.node));
+                        describe(&self.root, &m.element, &node, Some(&m.node));
                         m.node = node;
                     }
                 }
@@ -219,7 +219,7 @@ impl State {
                         .unchecked_into();
                     element.set_id(&element_id(&self.root, id));
                     element.set_attribute(NODE_ATTR, &id.0.to_string()).unwrap();
-                    describe(&element, &node, None);
+                    describe(&self.root, &element, &node, None);
                     if let Some(old) = other {
                         old.element.replace_with_with_node_1(&element).ok();
                     }
@@ -367,36 +367,42 @@ impl State {
         }
     }
 
-    /// What assistive tech did to an element: its node's click, or its focus
-    /// where it has no click. The canvas takes the keyboard again, for what
-    /// is typed next.
+    /// What assistive tech did to an element: the click of its nearest
+    /// mirrored node that has one, or that node's focus where it has no
+    /// click. A click on a button's text lands on the text's own element, so
+    /// the walk goes up through the mirror to the button, and no further. The
+    /// canvas takes the keyboard again, for what is typed next.
     fn clicked(&self, event: &web_sys::Event) {
-        let Some(target) = event
+        let selector = format!("[{NODE_ATTR}]");
+        let mut at = event
             .target()
             .and_then(|t| t.dyn_into::<Element>().ok())
-            .and_then(|e| e.closest(&format!("[{NODE_ATTR}]")).ok().flatten())
-        else {
-            return;
-        };
-        let Some(id) = target
-            .get_attribute(NODE_ATTR)
-            .and_then(|n| n.parse::<u64>().ok())
-            .map(NodeId)
-        else {
-            return;
-        };
-        let action = {
-            let mirror = self.mirror.borrow();
-            let Some(m) = mirror.nodes.get(&id) else {
+            .and_then(|e| e.closest(&selector).ok().flatten());
+        let (id, action) = loop {
+            let Some(element) = at.filter(|e| self.root.contains(Some(e))) else {
                 return;
             };
-            if m.node.supports_action(Action::Click) {
-                Action::Click
-            } else if m.node.supports_action(Action::Focus) {
-                Action::Focus
-            } else {
-                return;
+            let found = element
+                .get_attribute(NODE_ATTR)
+                .and_then(|n| n.parse::<u64>().ok())
+                .map(NodeId)
+                .and_then(|id| {
+                    let mirror = self.mirror.borrow();
+                    let node = &mirror.nodes.get(&id)?.node;
+                    if node.supports_action(Action::Click) {
+                        Some((id, Action::Click))
+                    } else if node.supports_action(Action::Focus) {
+                        Some((id, Action::Focus))
+                    } else {
+                        None
+                    }
+                });
+            if let Some(found) = found {
+                break found;
             }
+            at = element
+                .parent_element()
+                .and_then(|p| p.closest(&selector).ok().flatten());
         };
         event.prevent_default();
         let _ = self.canvas.focus();
@@ -457,8 +463,9 @@ fn takes_value_as_text(role: Role) -> bool {
 
 /// Writes `node`'s role, name and states onto `element`. `old` is the node
 /// the element last mirrored, whose attributes are cleared where `node` has
-/// none.
-fn describe(element: &HtmlElement, node: &Node, old: Option<&Node>) {
+/// none. `root` names the elements a reference such as `described_by`
+/// points at.
+fn describe(root: &HtmlElement, element: &HtmlElement, node: &Node, old: Option<&Node>) {
     let set = |name: &str, value: Option<String>| match value {
         Some(v) => {
             if element.get_attribute(name).as_deref() != Some(v.as_str()) {
@@ -475,6 +482,14 @@ fn describe(element: &HtmlElement, node: &Node, old: Option<&Node>) {
     set("role", aria_role(role).map(str::to_owned));
     set("aria-label", node.label().map(str::to_owned));
     set("aria-description", node.description().map(str::to_owned));
+    set("aria-describedby", {
+        let ids: Vec<String> = node
+            .described_by()
+            .iter()
+            .map(|&id| element_id(root, id))
+            .collect();
+        (!ids.is_empty()).then(|| ids.join(" "))
+    });
     set(
         "aria-roledescription",
         node.role_description().map(str::to_owned),
