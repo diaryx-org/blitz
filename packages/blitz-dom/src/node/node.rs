@@ -1441,6 +1441,30 @@ impl Node {
             return None;
         }
 
+        // PATCH(diaryx): a box that clips its overflow clips its descendants'
+        // hits as paint clips their drawing (`blitz-paint`'s `should_clip`):
+        // to its padding box, hoisted descendants included. Without it a
+        // descendant scrolled out of an `overflow: hidden` box, unseen, took
+        // the presses meant for whatever is drawn where it would be.
+        let clips_children = self.clips_overflow() && {
+            let ux = x - self.scroll_offset().x as f32;
+            let uy = y - self.scroll_offset().y as f32;
+            let l = self.final_layout();
+            let inside_padding_box = ux >= l.border.left
+                && ux <= size.width - l.border.right
+                && uy >= l.border.top
+                && uy <= size.height - l.border.bottom;
+            !inside_padding_box
+        };
+        if clips_children {
+            return (matches_self && !pointer_events_none).then_some(HitResult {
+                node_id: self.id,
+                x,
+                y,
+                is_text: false,
+            });
+        }
+
         // Descendants overwrite, so the innermost scroll container's thumb
         // wins. Thumb coords are border-box relative (unscrolled).
         if matches_self
@@ -1574,6 +1598,22 @@ impl Node {
         }
 
         None
+    }
+
+    /// PATCH(diaryx): whether this box clips its descendants to its padding
+    /// box, as paint clips them: its overflow is not `visible`, and it is not
+    /// the root element, whose overflow is the viewport's.
+    fn clips_overflow(&self) -> bool {
+        use style::values::computed::Overflow;
+        let is_root_element = self
+            .parent
+            .and_then(|p| self.tree().get(p))
+            .is_some_and(|p| matches!(p.data, NodeData::Document(_)));
+        !is_root_element
+            && self.primary_styles().is_some_and(|style| {
+                !matches!(style.clone_overflow_x(), Overflow::Visible)
+                    || !matches!(style.clone_overflow_y(), Overflow::Visible)
+            })
     }
 
     /// Find the inline root ancestor of this node (or self if this is an inline root).

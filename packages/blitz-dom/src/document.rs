@@ -3662,3 +3662,83 @@ mod tab_order_tests {
         assert_eq!(doc.focus_prev_node(), Some(last), "wrapping round");
     }
 }
+
+#[cfg(test)]
+mod overflow_clip_hit_tests {
+    use super::*;
+    use crate::{Attribute, qual_name};
+    use blitz_traits::shell::ColorScheme;
+
+    /// A bar over a fixed pane that clips its overflow, and in the pane a
+    /// spread scrolled so that a sheet runs up past the pane's top, under
+    /// the bar: the ids of the bar, the pane and the sheet.
+    fn make_doc(overflow: &str) -> (BaseDocument, NodeId, NodeId, NodeId) {
+        let mut doc = BaseDocument::new(DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        });
+        let root_id = doc.root_node().id;
+        let style = |value: String| Attribute {
+            name: qual_name!("style"),
+            value,
+        };
+        let mut m = doc.mutate();
+        let html = m.create_element(qual_name!("html"), vec![]);
+        let body = m.create_element(qual_name!("body"), vec![style("margin:0".into())]);
+        let bar = m.create_element(
+            qual_name!("div"),
+            vec![style(
+                "position:absolute;left:0;top:0;width:800px;height:50px;z-index:2".into(),
+            )],
+        );
+        let pane = m.create_element(
+            qual_name!("div"),
+            vec![style(format!(
+                "position:fixed;left:0;top:50px;width:800px;height:550px;z-index:2;\
+                 border:2px solid black;box-sizing:border-box;overflow:{overflow}"
+            ))],
+        );
+        let spread = m.create_element(
+            qual_name!("div"),
+            vec![style(
+                "position:absolute;left:0;top:-1000px;width:800px;height:3000px".into(),
+            )],
+        );
+        let sheet = m.create_element(
+            qual_name!("div"),
+            vec![style(
+                "position:absolute;left:100px;top:0;width:600px;height:3000px".into(),
+            )],
+        );
+        m.append_children(spread, &[sheet]);
+        m.append_children(pane, &[spread]);
+        m.append_children(body, &[bar, pane]);
+        m.append_children(html, &[body]);
+        m.append_children(root_id, &[html]);
+        drop(m);
+        doc.resolve(0.0);
+        (doc, bar, pane, sheet)
+    }
+
+    /// What is drawn clipped away is not pressed either: a press on the bar
+    /// is the bar's, though the pane, later and of the same z-index, has a
+    /// sheet out of its padding box under it, unseen.
+    #[test]
+    fn a_clipped_descendant_takes_no_hit_outside_its_clip() {
+        for overflow in ["hidden", "clip", "auto"] {
+            let (doc, bar, pane, sheet) = make_doc(overflow);
+            let hit = |x, y| doc.hit(x, y).map(|h| h.node_id);
+            assert_eq!(hit(400.0, 25.0), Some(bar), "overflow: {overflow}");
+            assert_eq!(hit(400.0, 300.0), Some(sheet), "overflow: {overflow}");
+            // On the pane's border, outside its padding box: the pane's own.
+            assert_eq!(hit(400.0, 51.0), Some(pane), "overflow: {overflow}");
+        }
+    }
+
+    /// Overflow left visible is drawn, and pressed, where it is.
+    #[test]
+    fn a_visible_overflow_still_takes_its_hits() {
+        let (doc, _, _, sheet) = make_doc("visible");
+        assert_eq!(doc.hit(400.0, 25.0).map(|h| h.node_id), Some(sheet));
+    }
+}
