@@ -125,6 +125,12 @@ Events and layout, found by diaryx-org/unit's gallery:
 - A press focuses what it lands on when that can be focused, and a click goes
   to the nearest element the press and the release share.
 - A node removed under `display: none` is forgotten by its layout parent.
+- A `position: fixed` box contained by the root element stays where the
+  viewport puts it while the document scrolls: drawn, hit and measured
+  (`getBoundingClientRect`, element coordinates) there. Upstream tested for
+  the root element as a box with no containing block, which dioxus-native's
+  root element has (a node above it that is not an element), so a page's
+  menus, dialogs and sheets scrolled off with the page.
 
 From Diaryx, where leaf's editor cancels `mousedown` to keep its own caret
 and selection, and the app's labels are `user-select: none`:
