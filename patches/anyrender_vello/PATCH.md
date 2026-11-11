@@ -58,6 +58,25 @@ This part goes when anyrender_vello falls back or reports the error itself,
 so that dioxus-native or the app can choose; it is the change to propose
 upstream (DioxusLabs/anyrender).
 
+## No wait for the GPU after a frame
+
+`render` presented its frame and then called
+`device.poll(PollType::wait_indefinitely())`, which blocks until the GPU
+has finished everything submitted. The next frame's work on the CPU could
+not start until then, so a frame took its CPU time and its GPU time end to
+end, whatever the frame latency. In Diaryx's app on a 3024x1964 Wayland
+output at 120 Hz (2026-11-11), scrolling a page took about 4 ms to build
+and submit and then waited a steady 5.1 ms for the GPU: about 9.7 ms a frame,
+past the 8.3 ms a 120 Hz frame has, so it ran at 71 to 100 frames a second.
+
+It polls without waiting now (`PollType::Poll`), which still lets wgpu free
+what finished frames held; acquiring the next surface texture, with the
+frame latency above, is what keeps the CPU from running ahead. The same
+scrolling ran at 117 to 123 frames a second. Over five minutes of
+continuous scrolling the process's resident memory peaked at 368 MB in the
+first minute and settled at about 190 MB; with the wait, a minute of the
+same held at about 350 MB. Nothing piles up.
+
 ## When it goes
 
 When dioxus-native lets the frame latency be set (a field on its

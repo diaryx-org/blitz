@@ -193,6 +193,11 @@ surface from wgpu, as in a Linux virtual machine), the window draws on the
 CPU through vello_cpu and softbuffer instead of the app panicking. Blitz
 cannot choose the renderer itself: dioxus-native fixes it at compile time.
 
+And `anyrender_vello` a third time, from Diaryx's app on a 120 Hz Linux
+screen: after presenting a frame it no longer waits for the GPU to finish
+it, so the next frame's CPU work runs while the GPU draws (`PATCH.md`). A
+frame took about 9.7 ms end to end before, past 120 Hz's 8.3 ms.
+
 And `anyrender_svg`, from Diaryx's app: an SVG's raster image is decoded
 once while its tree lives, not on every frame, and turned the way its EXIF
 orientation says. A photo in leaf's Reflow view, drawn inside a piece's
@@ -234,6 +239,23 @@ host's, and a generic family the database lacks falls back to the first of
 them. In a browser, which lists no system fonts, an SVG's text drew as
 nothing before; found in leaf's web host, where a Mermaid diagram's labels
 are SVG text.
+
+And a wheel's pixel delta in CSS pixels, from Diaryx's app on Linux: winit
+gives it in physical pixels, every backend converting its logical delta with
+the scale factor, and blitz-shell passed it on as CSS pixels, so on a 2x
+screen a trackpad scrolled a page twice as far as the fingers went. It is
+divided by the scale factor now. A line delta is unchanged.
+
+And on Linux and the BSDs, where the platform leaves it to the app, the
+wheel and the trackpad scroll a page once a frame (`blitz-shell/src/wheel.rs`),
+from Diaryx's app on a 120 Hz screen. Upstream dispatched each wheel event as
+it came, so a page moved as often as the device reported, unevenly against
+the display, a notch jumped a line at once, and a trackpad stopped dead when
+the fingers lifted. Now a trackpad's path is replayed a report behind and
+sampled at each frame, a notch is eased over about 75 ms, and lifted fingers
+glide on, slowing as the touch fling does, until two fingers set down, a
+press, the pointer moving or new scrolling stop them. A Ctrl- or Cmd-wheel goes through as it
+comes. macOS sends momentum of its own and is left as it was.
 
 And a package upstream does not have, `blitz-tui` (on the `tui` branch until
 it merges into `leaf`): Blitz's laid-out page painted into a terminal's

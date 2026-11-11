@@ -5,6 +5,7 @@ use crate::convert_events::{
     winit_key_event_to_blitz, winit_modifiers_to_kbt_modifiers,
 };
 use crate::event::{BlitzShellEvent, BlitzShellProxy, create_waker};
+use crate::wheel::{self, WheelSmoother};
 use anyrender::WindowRenderer;
 use blitz_dom::Document;
 use blitz_paint::paint_scene;
@@ -94,6 +95,14 @@ pub struct View<Rend: WindowRenderer> {
     pub active_events: Arc<AtomicRefCell<Vec<BlitzPointerEvent>>>,
     pub animation_timer: Option<Instant>,
     pub is_visible: bool,
+    /// Wheel input waiting for the frames it moves in (`wheel.rs`), where
+    /// [`wheel::SMOOTH`]; the pointer's position when the scroll began, the
+    /// coordinates of every event it gives out (a pointer moving away from
+    /// it ends the scroll: see `finish_wheel_before_move`); and the clock
+    /// it runs on.
+    wheel: WheelSmoother,
+    wheel_at: PhysicalPosition<f64>,
+    wheel_clock: Instant,
     pub safe_area_insets: PhysicalInsets<u32>,
 
     #[cfg(target_arch = "wasm32")]
@@ -225,6 +234,9 @@ impl<Rend: WindowRenderer> View<Rend> {
             resize_timer_scheduled: false,
             pointer_pos: Default::default(),
             is_visible: winit_window.is_visible().unwrap_or(true),
+            wheel: WheelSmoother::default(),
+            wheel_at: Default::default(),
+            wheel_clock: Instant::now(),
             #[cfg(feature = "accessibility")]
             accessibility,
 
@@ -389,9 +401,69 @@ impl<Rend: WindowRenderer> View<Rend> {
         }
     }
 
+    /// Milliseconds on the clock the wheel smoother runs on.
+    fn wheel_now(&self) -> f64 {
+        self.wheel_clock.elapsed().as_secs_f64() * 1000.0
+    }
+
+    /// Dispatches one wheel event, aimed at `at`.
+    fn dispatch_wheel(&mut self, delta: BlitzWheelDelta, at: PhysicalPosition<f64>) {
+        let event = BlitzWheelEvent {
+            delta,
+            coords: self.pointer_coords(at),
+            buttons: self.buttons,
+            mods: winit_modifiers_to_kbt_modifiers(self.keyboard_modifiers.state()),
+            element: Default::default(),
+        };
+        self.doc.handle_ui_event(UiEvent::Wheel(event));
+    }
+
+    /// A wheel event goes to the hovered node (blitz-dom's `EventDriver`),
+    /// and a pointer move changes which that is. So a pointer that moves
+    /// while a scroll is still being given out ends the scroll first: what
+    /// the fingers or the wheel had moved goes at once to where it began,
+    /// and a glide stops, as touching the trackpad stops one on a Mac.
+    /// Otherwise the rest of a glide would scroll whatever pane the pointer
+    /// moved over. A few pixels of jitter are let pass.
+    fn finish_wheel_before_move(&mut self, position: PhysicalPosition<f64>) {
+        const SLOP_CSS_PX: f64 = 4.0;
+        let now = self.wheel_now();
+        if !self.wheel.is_active(now) {
+            return;
+        }
+        let slop = SLOP_CSS_PX * self.window.scale_factor();
+        let (dx, dy) = (position.x - self.wheel_at.x, position.y - self.wheel_at.y);
+        if dx.hypot(dy) <= slop {
+            return;
+        }
+        self.wheel.stop_glide();
+        self.wheel.finish();
+        self.scroll_wheel_for_frame();
+        self.request_redraw();
+    }
+
+    /// This frame's wheel scrolling, dispatched before the document is
+    /// resolved, and what the page's handlers did with it run now, so that
+    /// it is drawn in this frame and not the next.
+    fn scroll_wheel_for_frame(&mut self) {
+        let frame = self.wheel.tick(self.wheel_now());
+        let mut dispatched = false;
+        for delta in frame.deltas() {
+            self.dispatch_wheel(delta, self.wheel_at);
+            dispatched = true;
+        }
+        if dispatched && let Some(waker) = &self.waker {
+            let cx = std::task::Context::from_waker(waker);
+            self.doc.poll(Some(cx));
+        }
+    }
+
     pub fn redraw(&mut self) {
         #[cfg(target_os = "ios")]
         self.ios_request_redraw.set(false);
+        if self.wheel.is_active(self.wheel_now()) {
+            self.scroll_wheel_for_frame();
+        }
         let animation_time = self.current_animation_time();
         let is_visible = self.is_visible;
 
@@ -433,7 +505,7 @@ impl<Rend: WindowRenderer> View<Rend> {
         #[cfg(feature = "accessibility")]
         self.build_accessibility_tree();
 
-        if !is_blocked && is_visible && is_animating {
+        if !is_blocked && is_visible && (is_animating || self.wheel.is_active(self.wheel_now())) {
             self.request_redraw();
         }
     }
@@ -863,6 +935,7 @@ impl<Rend: WindowRenderer> View<Rend> {
                 self.request_redraw();
             }
             WindowEvent::PointerMoved { position, source, primary, .. } => {
+                self.finish_wheel_before_move(position);
                 self.pointer_pos = position;
                 let id = pointer_source_to_blitz(&source);
                 let event = BlitzPointerEvent {
@@ -898,7 +971,11 @@ impl<Rend: WindowRenderer> View<Rend> {
                 };
 
                 match state {
-                    ElementState::Pressed => self.buttons |= button.into(),
+                    ElementState::Pressed => {
+                        self.buttons |= button.into();
+                        // A press stops a wheel's glide, as on any desktop.
+                        self.wheel.stop_glide();
+                    }
                     ElementState::Released => self.buttons ^= button.into(),
                 }
 
@@ -957,10 +1034,16 @@ impl<Rend: WindowRenderer> View<Rend> {
                 self.doc.handle_ui_event(event);
                 self.request_redraw();
             }
-            WindowEvent::MouseWheel { delta, .. } => {
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                // PATCH(diaryx): winit's pixel delta is in physical pixels
+                // (every backend converts its logical delta with the scale
+                // factor), and the document scrolls in CSS pixels, so on a 2x
+                // screen a trackpad moved the page twice as far as the
+                // fingers went. Upstream passes it through as it is.
+                let scale = self.window.scale_factor();
                 let blitz_delta = match delta {
                     winit::event::MouseScrollDelta::LineDelta(x, y) => BlitzWheelDelta::Lines(x as f64, y as f64),
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => BlitzWheelDelta::Pixels(pos.x, pos.y),
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => BlitzWheelDelta::Pixels(pos.x / scale, pos.y / scale),
                     _ =>  {
                         #[cfg(feature = "tracing")]
                         tracing::error!("unsupported MouseScrollDelta variant: {delta:?}");
@@ -968,15 +1051,30 @@ impl<Rend: WindowRenderer> View<Rend> {
                     }
                 };
 
-                let event = BlitzWheelEvent {
-                    delta: blitz_delta,
-                    coords: self.pointer_coords(self.pointer_pos),
-                    buttons: self.buttons,
-                    mods: winit_modifiers_to_kbt_modifiers(self.keyboard_modifiers.state()),
-                    element: Default::default()
-                };
-
-                self.doc.handle_ui_event(UiEvent::Wheel(event));
+                // PATCH(diaryx): where the platform leaves it to the app, the
+                // wheel moves the page once a frame, and glides on after the
+                // fingers lift (`wheel.rs`). A Ctrl- or Cmd-wheel, a zoom in
+                // most pages, goes through as it comes.
+                let mods = self.keyboard_modifiers.state();
+                if wheel::SMOOTH && !(mods.control_key() || mods.meta_key()) {
+                    if !self.wheel.is_active(self.wheel_now()) {
+                        self.wheel_at = self.pointer_pos;
+                    }
+                    let now = self.wheel_now();
+                    self.wheel.push(now, blitz_delta, phase);
+                    self.request_redraw();
+                } else {
+                    if self.wheel.is_active(self.wheel_now()) {
+                        self.wheel.finish();
+                        self.scroll_wheel_for_frame();
+                    }
+                    self.dispatch_wheel(blitz_delta, self.pointer_pos);
+                }
+            }
+            // Two fingers set down on the trackpad stop a glide (Wayland's
+            // hold gesture), as they do in the rest of the desktop.
+            WindowEvent::HoldGesture { phase: winit::event::TouchPhase::Started, .. } => {
+                self.wheel.stop_glide();
             }
             WindowEvent::Focused(_) => {}
             WindowEvent::TouchpadPressure { .. } => {}
