@@ -382,8 +382,9 @@ impl BaseDocument {
         let mut current = Some(node_id);
         while let Some(id) = current {
             let node = &self.nodes[id];
-            pos.x += node.unrounded_layout().location.x - node.scroll_offset().x as f32;
-            pos.y += node.unrounded_layout().location.y - node.scroll_offset().y as f32;
+            let fixed = node.fixed_scroll_correction();
+            pos.x += node.unrounded_layout().location.x - node.scroll_offset().x as f32 + fixed.x;
+            pos.y += node.unrounded_layout().location.y - node.scroll_offset().y as f32 + fixed.y;
             has_vertical |= node.layout_data().writing_mode.is_vertical();
             current = node.containing_block();
         }

@@ -1525,7 +1525,7 @@ impl Node {
                 // against the viewport and do not scroll with it. (A fixed box
                 // whose containing block is a transformed ancestor scrolls with
                 // that ancestor like any other out-of-flow box.)
-                if child_position == taffy::Position::Fixed && self.containing_block().is_none() {
+                if child_position == taffy::Position::Fixed && self.is_root_element() {
                     child_x -= self.scroll_offset().x as f32;
                     child_y -= self.scroll_offset().y as f32;
                     let viewport_scroll = self.tree().viewport_scroll();
@@ -1696,10 +1696,50 @@ impl Node {
             .or_else(|| self.layout_parent.get())
     }
 
+    /// Whether this is the root element: an element laid out under no other
+    /// element. Its layout parent is the document node, or a node a renderer
+    /// puts above it (dioxus-native's), or nothing.
+    // PATCH(diaryx): the root element's own containing block is not always
+    // `None`, so a test of that missed it in a dioxus-native document.
+    pub fn is_root_element(&self) -> bool {
+        self.is_element()
+            && self
+                .containing_block()
+                .is_none_or(|parent| !self.with(parent).is_element())
+    }
+
+    /// Whether this is a `position: fixed` box placed against the viewport:
+    /// one whose containing block is the root element, which does not scroll
+    /// with the document. (A fixed box contained by a transformed ancestor
+    /// scrolls with that ancestor.)
+    pub fn is_fixed_to_viewport(&self) -> bool {
+        self.taffy_position() == taffy::Position::Fixed
+            && self
+                .containing_block()
+                .is_some_and(|cb| self.with(cb).is_root_element())
+    }
+
+    /// What to add to a document-relative position walked up through this
+    /// node to its containing block, to place it as the viewport shows it:
+    /// for a box fixed to the viewport, the scroll the walk takes off at the
+    /// root element and the viewport's, which do not move it.
+    pub(crate) fn fixed_scroll_correction(&self) -> crate::util::Point<f32> {
+        if !self.is_fixed_to_viewport() {
+            return crate::util::Point { x: 0.0, y: 0.0 };
+        }
+        let cb = self.with(self.containing_block().unwrap());
+        let viewport = self.tree().viewport_scroll();
+        crate::util::Point {
+            x: (cb.scroll_offset().x + viewport.x) as f32,
+            y: (cb.scroll_offset().y + viewport.y) as f32,
+        }
+    }
+
     /// Computes the Document-relative coordinates of the `Node`
     pub fn absolute_position(&self, x: f32, y: f32) -> crate::util::Point<f32> {
-        let x = x + self.final_layout().location.x - self.scroll_offset().x as f32;
-        let y = y + self.final_layout().location.y - self.scroll_offset().y as f32;
+        let fixed = self.fixed_scroll_correction();
+        let x = x + self.final_layout().location.x - self.scroll_offset().x as f32 + fixed.x;
+        let y = y + self.final_layout().location.y - self.scroll_offset().y as f32 + fixed.y;
 
         // Recurse up the positioning hierarchy
         self.containing_block()
