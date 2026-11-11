@@ -96,9 +96,10 @@ pub struct View<Rend: WindowRenderer> {
     pub animation_timer: Option<Instant>,
     pub is_visible: bool,
     /// Wheel input waiting for the frames it moves in (`wheel.rs`), where
-    /// [`wheel::SMOOTH`]; the pointer's position when it began, which every
-    /// event it gives out is aimed at, so that a glide keeps to the scroller
-    /// it started in; and the clock it runs on.
+    /// [`wheel::SMOOTH`]; the pointer's position when the scroll began, the
+    /// coordinates of every event it gives out (a pointer moving away from
+    /// it ends the scroll: see `finish_wheel_before_move`); and the clock
+    /// it runs on.
     wheel: WheelSmoother,
     wheel_at: PhysicalPosition<f64>,
     wheel_clock: Instant,
@@ -415,6 +416,30 @@ impl<Rend: WindowRenderer> View<Rend> {
             element: Default::default(),
         };
         self.doc.handle_ui_event(UiEvent::Wheel(event));
+    }
+
+    /// A wheel event goes to the hovered node (blitz-dom's `EventDriver`),
+    /// and a pointer move changes which that is. So a pointer that moves
+    /// while a scroll is still being given out ends the scroll first: what
+    /// the fingers or the wheel had moved goes at once to where it began,
+    /// and a glide stops, as touching the trackpad stops one on a Mac.
+    /// Otherwise the rest of a glide would scroll whatever pane the pointer
+    /// moved over. A few pixels of jitter are let pass.
+    fn finish_wheel_before_move(&mut self, position: PhysicalPosition<f64>) {
+        const SLOP_CSS_PX: f64 = 4.0;
+        let now = self.wheel_now();
+        if !self.wheel.is_active(now) {
+            return;
+        }
+        let slop = SLOP_CSS_PX * self.window.scale_factor();
+        let (dx, dy) = (position.x - self.wheel_at.x, position.y - self.wheel_at.y);
+        if dx.hypot(dy) <= slop {
+            return;
+        }
+        self.wheel.stop_glide();
+        self.wheel.finish();
+        self.scroll_wheel_for_frame();
+        self.request_redraw();
     }
 
     /// This frame's wheel scrolling, dispatched before the document is
@@ -910,6 +935,7 @@ impl<Rend: WindowRenderer> View<Rend> {
                 self.request_redraw();
             }
             WindowEvent::PointerMoved { position, source, primary, .. } => {
+                self.finish_wheel_before_move(position);
                 self.pointer_pos = position;
                 let id = pointer_source_to_blitz(&source);
                 let event = BlitzPointerEvent {

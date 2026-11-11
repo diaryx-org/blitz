@@ -19,8 +19,8 @@
 //! - When the fingers lift (Wayland's `axis_stop`, winit's
 //!   [`TouchPhase::Ended`]), the scroll glides on at the speed they had and
 //!   slows as blitz-dom's touch fling does: UIKit's deceleration, 0.998 of the
-//!   speed kept a millisecond. Two fingers set down again, a press, or any
-//!   new scrolling stops it.
+//!   speed kept a millisecond. Two fingers set down again, a press, the
+//!   pointer moving, or any new scrolling stops it.
 //! - A mouse wheel's notch is eased out over about 75 ms, as a browser does.
 //!
 //! Everything given in is given out: the smoother changes when a page
@@ -537,6 +537,22 @@ mod tests {
         // Caught up with the reports, but the next may come at any frame.
         assert!(s.is_active(60.0));
         assert!(!s.is_active(16.0 + GESTURE_TIMEOUT_MS));
+    }
+
+    #[test]
+    fn a_scroll_ended_early_gives_out_what_was_moved_and_no_glide() {
+        let mut s = WheelSmoother::default();
+        let before = steady(&mut s, 10.0, 15.0, 200.0, true);
+        // The replay is still a report behind, and the glide not begun.
+        s.stop_glide();
+        s.finish();
+        let now = s.tick(201.0).pixels.map_or(0.0, |p| p.1);
+        let after = frames(&mut s, 202.0, 2000.0);
+        assert!(after.iter().all(|d| *d == 0.0), "{after:?}");
+        assert!(!s.is_active(2000.0));
+        // All 21 reports' movement, given out once, and nothing more.
+        let total = before.iter().sum::<f64>() + now;
+        assert!((total - 21.0 * 15.0).abs() < 1e-6, "{total}");
     }
 
     #[test]

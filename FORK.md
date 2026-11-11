@@ -254,7 +254,7 @@ the display, a notch jumped a line at once, and a trackpad stopped dead when
 the fingers lifted. Now a trackpad's path is replayed a report behind and
 sampled at each frame, a notch is eased over about 75 ms, and lifted fingers
 glide on, slowing as the touch fling does, until two fingers set down, a
-press or new scrolling stop them. A Ctrl- or Cmd-wheel goes through as it
+press, the pointer moving or new scrolling stop them. A Ctrl- or Cmd-wheel goes through as it
 comes. macOS sends momentum of its own and is left as it was.
 
 And a package upstream does not have, `blitz-tui` (on the `tui` branch until
