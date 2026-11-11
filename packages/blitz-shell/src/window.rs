@@ -958,9 +958,15 @@ impl<Rend: WindowRenderer> View<Rend> {
                 self.request_redraw();
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                // PATCH(diaryx): winit's pixel delta is in physical pixels
+                // (every backend converts its logical delta with the scale
+                // factor), and the document scrolls in CSS pixels, so on a 2x
+                // screen a trackpad moved the page twice as far as the
+                // fingers went. Upstream passes it through as it is.
+                let scale = self.window.scale_factor();
                 let blitz_delta = match delta {
                     winit::event::MouseScrollDelta::LineDelta(x, y) => BlitzWheelDelta::Lines(x as f64, y as f64),
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => BlitzWheelDelta::Pixels(pos.x, pos.y),
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => BlitzWheelDelta::Pixels(pos.x / scale, pos.y / scale),
                     _ =>  {
                         #[cfg(feature = "tracing")]
                         tracing::error!("unsupported MouseScrollDelta variant: {delta:?}");

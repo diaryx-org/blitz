@@ -235,6 +235,12 @@ them. In a browser, which lists no system fonts, an SVG's text drew as
 nothing before; found in leaf's web host, where a Mermaid diagram's labels
 are SVG text.
 
+And a wheel's pixel delta in CSS pixels, from Diaryx's app on Linux: winit
+gives it in physical pixels, every backend converting its logical delta with
+the scale factor, and blitz-shell passed it on as CSS pixels, so on a 2x
+screen a trackpad scrolled a page twice as far as the fingers went. It is
+divided by the scale factor now. A line delta is unchanged.
+
 And a package upstream does not have, `blitz-tui` (on the `tui` branch until
 it merges into `leaf`): Blitz's laid-out page painted into a terminal's
 character cells, a sibling of `blitz-paint` and `blitz-shell` that keeps the
