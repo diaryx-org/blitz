@@ -988,6 +988,40 @@ impl ElementCx<'_, '_> {
                 self.node.id,
                 &mut draw_text_context,
             );
+
+            // PATCH(diaryx): an empty input shows its placeholder, in the
+            // input's colour at Firefox's `::placeholder` opacity (0.54),
+            // inside the input's content box.
+            if input_data.editor.text().into_iter().all(str::is_empty)
+                && let Some(layout) = input_data.placeholder.as_ref().and_then(|p| p.try_layout())
+            {
+                let size = self.node.final_layout().content_box_size();
+                let clip = kurbo::Rect::new(
+                    0.0,
+                    -y_offset * self.scale,
+                    size.width as f64 * self.scale,
+                    (size.height as f64 - y_offset) * self.scale,
+                );
+                scene.push_layer(
+                    Fill::NonZero,
+                    peniko::Mix::Normal,
+                    0.54,
+                    transform,
+                    &clip,
+                    None,
+                    None,
+                );
+                crate::text::stroke_text(
+                    scene,
+                    layout.lines(),
+                    self.context.dom,
+                    transform,
+                    self.scale,
+                    self.node.id,
+                    &mut draw_text_context,
+                );
+                scene.pop_layer();
+            }
         }
     }
 
