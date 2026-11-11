@@ -193,6 +193,11 @@ surface from wgpu, as in a Linux virtual machine), the window draws on the
 CPU through vello_cpu and softbuffer instead of the app panicking. Blitz
 cannot choose the renderer itself: dioxus-native fixes it at compile time.
 
+And `anyrender_vello` a third time, from Diaryx's app on a 120 Hz Linux
+screen: after presenting a frame it no longer waits for the GPU to finish
+it, so the next frame's CPU work runs while the GPU draws (`PATCH.md`). A
+frame took about 9.7 ms end to end before, past 120 Hz's 8.3 ms.
+
 And `anyrender_svg`, from Diaryx's app: an SVG's raster image is decoded
 once while its tree lives, not on every frame, and turned the way its EXIF
 orientation says. A photo in leaf's Reflow view, drawn inside a piece's

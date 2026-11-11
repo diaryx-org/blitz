@@ -585,9 +585,12 @@ impl WindowRenderer for VelloWindowRenderer {
         }
         timer.record_time("present");
 
+        // PATCH(diaryx): poll, not wait. Waiting for the GPU to finish the
+        // frame kept the next frame's CPU work from overlapping it; the next
+        // surface texture's acquisition is what throttles (PATCH.md).
         render_surface
             .device()
-            .poll(wgpu::PollType::wait_indefinitely())
+            .poll(wgpu::PollType::Poll)
             .unwrap();
 
         timer.record_time("wait");
