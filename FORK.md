@@ -131,6 +131,10 @@ Events and layout, found by diaryx-org/unit's gallery:
   the root element as a box with no containing block, which dioxus-native's
   root element has (a node above it that is not an element), so a page's
   menus, dialogs and sheets scrolled off with the page.
+- An empty text input or textarea paints its `placeholder`, laid out in its
+  own styles and faded to Firefox's `::placeholder` opacity (0.54); upstream
+  gave it to the accessibility tree and never drew it, so a field showed
+  nothing but its box.
 
 From Diaryx, where leaf's editor cancels `mousedown` to keep its own caret
 and selection, and the app's labels are `user-select: none`:

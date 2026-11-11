@@ -873,6 +873,10 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
     } else {
         node.attr(local_name!("value")).unwrap_or("").to_string()
     };
+    let placeholder = node
+        .attr(local_name!("placeholder"))
+        .filter(|p| !p.is_empty())
+        .map(str::to_string);
     let element = &mut node.data.downcast_element_mut().unwrap();
     if !matches!(element.special_data, SpecialElementData::TextInput(_)) {
         let mut text_input_data = TextInputData::new(is_multiline);
@@ -911,6 +915,23 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
     editor.set_alignment(alignment);
     editor.set_base_direction(base_direction);
 
+    // PATCH(diaryx): the placeholder, in the same styles as the text.
+    text_input_data.placeholder = placeholder.map(|text| {
+        let mut p = text_input_data
+            .placeholder
+            .take()
+            .unwrap_or_else(|| Box::new(parley::PlainEditor::new(16.0)));
+        p.set_scale(doc.viewport.scale_f64() as f32);
+        p.set_width(None);
+        *p.edit_styles() = text_input_data.editor.edit_styles().clone();
+        p.set_alignment(alignment);
+        p.set_base_direction(base_direction);
+        p.set_text(&text);
+        p.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
+        p
+    });
+
+    let editor = &mut text_input_data.editor;
     editor.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
 }
 
