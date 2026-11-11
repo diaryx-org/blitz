@@ -12,6 +12,7 @@ mod application;
 mod convert_events;
 mod event;
 mod net;
+mod wheel;
 mod window;
 
 #[cfg(feature = "accessibility")]

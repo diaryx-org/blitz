@@ -241,6 +241,17 @@ the scale factor, and blitz-shell passed it on as CSS pixels, so on a 2x
 screen a trackpad scrolled a page twice as far as the fingers went. It is
 divided by the scale factor now. A line delta is unchanged.
 
+And on Linux and the BSDs, where the platform leaves it to the app, the
+wheel and the trackpad scroll a page once a frame (`blitz-shell/src/wheel.rs`),
+from Diaryx's app on a 120 Hz screen. Upstream dispatched each wheel event as
+it came, so a page moved as often as the device reported, unevenly against
+the display, a notch jumped a line at once, and a trackpad stopped dead when
+the fingers lifted. Now a trackpad's path is replayed a report behind and
+sampled at each frame, a notch is eased over about 75 ms, and lifted fingers
+glide on, slowing as the touch fling does, until two fingers set down, a
+press or new scrolling stop them. A Ctrl- or Cmd-wheel goes through as it
+comes. macOS sends momentum of its own and is left as it was.
+
 And a package upstream does not have, `blitz-tui` (on the `tui` branch until
 it merges into `leaf`): Blitz's laid-out page painted into a terminal's
 character cells, a sibling of `blitz-paint` and `blitz-shell` that keeps the
