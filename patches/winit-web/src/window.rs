@@ -314,12 +314,16 @@ impl RootWindow for Window {
         // Currently an intentional no-op
     }
 
+    // leaf patch: the input method (`web_sys/ime.rs`), where upstream has none.
     fn ime_capabilities(&self) -> Option<winit_core::window::ImeCapabilities> {
-        None
+        self.inner.queue(|inner| inner.canvas.ime.capabilities())
     }
 
-    fn request_ime_update(&self, _: winit_core::window::ImeRequest) -> Result<(), ImeRequestError> {
-        Err(ImeRequestError::NotSupported)
+    fn request_ime_update(
+        &self,
+        request: winit_core::window::ImeRequest,
+    ) -> Result<(), ImeRequestError> {
+        self.inner.queue(move |inner| inner.canvas.ime.request(request))
     }
 
     fn focus_window(&self) {

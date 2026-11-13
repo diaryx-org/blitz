@@ -3,6 +3,8 @@ mod canvas;
 pub mod event;
 mod event_handle;
 mod fullscreen;
+// leaf patch: the input method, through a hidden textarea.
+pub mod ime;
 mod intersection_handle;
 mod media_query_handle;
 mod pointer;

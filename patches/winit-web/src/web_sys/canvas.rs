@@ -40,6 +40,8 @@ pub struct Canvas {
     pub prevent_default: Rc<Cell<bool>>,
     pub is_intersecting: Cell<Option<bool>>,
     pub cursor: CursorHandler,
+    // leaf patch: the input method (`ime.rs`).
+    pub ime: super::ime::ImeHandler,
     handlers: RefCell<Handlers>,
 }
 
@@ -163,11 +165,20 @@ impl Canvas {
             let _ = common.raw.focus();
         }
 
+        let has_focus = Rc::new(Cell::new(false));
+        let ime = super::ime::ImeHandler::new(
+            window.clone(),
+            document.clone(),
+            canvas.clone(),
+            Rc::clone(&has_focus),
+        );
+
         Ok(Canvas {
             main_thread,
             common,
             id,
-            has_focus: Rc::new(Cell::new(false)),
+            has_focus,
+            ime,
             prevent_default: Rc::new(Cell::new(web_attributes.prevent_default)),
             is_intersecting: Cell::new(None),
             cursor,
@@ -270,7 +281,11 @@ impl Canvas {
         F: 'static + FnMut(),
     {
         self.handlers.borrow_mut().on_blur =
-            Some(self.common.add_event("blur", move |_: FocusEvent| {
+            Some(self.common.add_event("blur", move |event: FocusEvent| {
+                // leaf patch: focus moving to the IME's textarea stays in the window.
+                if super::ime::is_area(event.related_target()) {
+                    return;
+                }
                 handler();
             }));
     }
@@ -285,10 +300,13 @@ impl Canvas {
             }));
     }
 
-    pub fn on_keyboard_release<F>(&self, mut handler: F)
+    pub fn on_keyboard_release<F>(&self, handler: F)
     where
         F: 'static + FnMut(PhysicalKey, Key, Option<SmolStr>, KeyLocation, bool, ModifiersState),
     {
+        // leaf patch: shared with the IME's textarea, which sends keys too.
+        let handler: super::ime::KeyHandler = Rc::new(RefCell::new(handler));
+        self.ime.set_release(Rc::clone(&handler));
         let prevent_default = Rc::clone(&self.prevent_default);
         self.handlers.borrow_mut().on_keyboard_release =
             Some(self.common.add_event("keyup", move |event: KeyboardEvent| {
@@ -297,7 +315,7 @@ impl Canvas {
                 }
                 let key = event::key(&event);
                 let modifiers = event::keyboard_modifiers(&event);
-                handler(
+                (handler.borrow_mut())(
                     event::key_code(&event),
                     key,
                     event::key_text(&event),
@@ -308,10 +326,13 @@ impl Canvas {
             }));
     }
 
-    pub fn on_keyboard_press<F>(&self, mut handler: F)
+    pub fn on_keyboard_press<F>(&self, handler: F)
     where
         F: 'static + FnMut(PhysicalKey, Key, Option<SmolStr>, KeyLocation, bool, ModifiersState),
     {
+        // leaf patch: shared with the IME's textarea, which sends keys too.
+        let handler: super::ime::KeyHandler = Rc::new(RefCell::new(handler));
+        self.ime.set_press(Rc::clone(&handler));
         let prevent_default = Rc::clone(&self.prevent_default);
         self.handlers.borrow_mut().on_keyboard_press =
             Some(self.common.add_event("keydown", move |event: KeyboardEvent| {
@@ -320,7 +341,7 @@ impl Canvas {
                 }
                 let key = event::key(&event);
                 let modifiers = event::keyboard_modifiers(&event);
-                handler(
+                (handler.borrow_mut())(
                     event::key_code(&event),
                     key,
                     event::key_text(&event),

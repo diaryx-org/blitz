@@ -114,13 +114,18 @@ impl PointerHandler {
     {
         let window = canvas_common.window.clone();
         let canvas = canvas_common.raw().clone();
+        let document = canvas_common.document.clone();
         self.on_pointer_press =
             Some(canvas_common.add_event("pointerdown", move |event: PointerEvent| {
                 if prevent_default.get() {
                     // prevent text selection
                     event.prevent_default();
                     // but still focus element
-                    let _ = canvas.focus();
+                    // leaf patch: unless the IME's textarea has it, as taking
+                    // it would drop a phone's keyboard on every tap
+                    if !super::ime::area_focused(&document) {
+                        let _ = canvas.focus();
+                    }
                 }
 
                 let modifiers = event::mouse_modifiers(&event);
@@ -191,6 +196,7 @@ impl PointerHandler {
     {
         let window = canvas_common.window.clone();
         let canvas = canvas_common.raw().clone();
+        let document = canvas_common.document.clone();
         self.on_cursor_move =
             Some(canvas_common.add_event("pointermove", move |event: PointerEvent| {
                 let pointer_id = event.pointer_id();
@@ -204,7 +210,10 @@ impl PointerHandler {
                         // prevent text selection
                         event.prevent_default();
                         // but still focus element
-                        let _ = canvas.focus();
+                        // leaf patch: unless the IME's textarea has it
+                        if !super::ime::area_focused(&document) {
+                            let _ = canvas.focus();
+                        }
                     }
 
                     let state = if event::pointer_buttons(&event)

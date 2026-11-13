@@ -71,6 +71,14 @@ impl ActiveEventLoop {
     pub fn register(&self, canvas: &Rc<backend::Canvas>, window_id: WindowId) {
         let canvas_clone = canvas.clone();
 
+        // leaf patch: the IME's events go to this window.
+        let runner = self.runner.clone();
+        canvas.ime.set_sink(Rc::new(move |events: Vec<WindowEvent>| {
+            runner.send_events(
+                events.into_iter().map(|event| Event::WindowEvent { window_id, event }),
+            )
+        }));
+
         canvas.on_touch_start();
 
         let runner = self.runner.clone();

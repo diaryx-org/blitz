@@ -164,11 +164,13 @@ published crates (`apps/diaryx/patches` there):
 And the winit backends dioxus-native pins, patched, in `patches/`:
 `winit-appkit` (the Mac's text input client answers about the text round the
 caret: accents, the emoji picker, dictation) and `winit-uikit` (the UIScene
-lifecycle iOS 27 requires), which came from leaf's `patches/`; and
+lifecycle iOS 27 requires), which came from leaf's `patches/`;
 `winit-android` (`Ime` events an application's own input connection hands
 it, an event loop that ends with its activity, and hovers left to the
 window's views, for TalkBack's explore-by-touch), from Diaryx's Android
-app.
+app; and `winit-web` (an input method through a hidden textarea, which is
+what raises a phone's keyboard, given only for a tap on text), from
+Diaryx's web build.
 
 And `accesskit_android`, the adapter `accesskit_xplat` takes on Android, with
 AccessKit's unreleased fix for a crash on the first letter typed into an

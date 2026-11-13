@@ -110,6 +110,11 @@ features = [
     "HtmlElement",
     "HtmlHtmlElement",
     "HtmlImageElement",
+    # leaf patch: the IME's textarea (`src/web_sys/ime.rs`).
+    "HtmlTextAreaElement",
+    "InputEvent",
+    "CompositionEvent",
+    "FocusOptions",
     "ImageBitmap",
     "ImageBitmapOptions",
     "ImageBitmapRenderingContext",
