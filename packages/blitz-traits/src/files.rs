@@ -194,6 +194,9 @@ pub struct FileRequest {
     pub directory: bool,
     /// `accept`, parsed. Empty: any file.
     pub accept: Vec<Accept>,
+    /// Where the picker opens: an app's own (beside the document open);
+    /// else, as for a file input, the folder the last file came from.
+    pub folder: Option<std::path::PathBuf>,
 }
 
 impl FileRequest {
@@ -203,6 +206,7 @@ impl FileRequest {
             multiple,
             directory,
             accept: accept.map(Accept::parse).unwrap_or_default(),
+            folder: None,
         }
     }
 

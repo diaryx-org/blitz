@@ -47,7 +47,7 @@ pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super
     if let Some(types) = super::uttypes::of(&request).filter(|_| !request.directory) {
         panel.setAllowedContentTypes(&NSArray::from_retained_slice(&types));
     }
-    if let Some(folder) = super::last_folder() {
+    if let Some(folder) = request.folder.clone().or_else(super::last_folder) {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&folder.to_string_lossy()));
         panel.setDirectoryURL(Some(&url));
     }
