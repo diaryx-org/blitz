@@ -223,8 +223,9 @@ impl BaseDocument {
             // node holds it. It is the field's value, which assistive tech
             // may replace, and the field may be focused.
             if let Some(input) = element_data.text_input_data() {
+                // A password input's editor holds only its bullets.
                 let text = input.editor.raw_text();
-                if element_data.attr(local_name!("type")) == Some("password") {
+                if input.is_password() {
                     builder.set_value("•".repeat(text.chars().count()));
                 } else {
                     builder.set_value(text);

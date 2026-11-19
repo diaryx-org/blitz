@@ -954,6 +954,7 @@ dependencies = [
  "web-time",
  "writeable",
  "wuff",
+ "zeroize",
 ]
 
 [[package]]

@@ -323,7 +323,26 @@ impl DocumentMutator<'_> {
                 .attribute_changed(&name.local, old_value, Some(value));
         }
 
-        element.attrs.set(name.clone(), value);
+        // PATCH(diaryx): a password input's value is its text input's alone,
+        // where it is wiped: the attribute keeps none of it once the input
+        // has been laid out (the first layout takes its value from here).
+        let password_input = name.local == local_name!("value")
+            && element.text_input_data().is_some_and(|i| i.is_password());
+        element
+            .attrs
+            .set(name.clone(), if password_input { "" } else { value });
+
+        // A text input follows its `type` in and out of `password`: a
+        // password shown, and hidden again.
+        if name.local == local_name!("type") {
+            if let Some(input_data) = element.text_input_data_mut() {
+                input_data.set_password(
+                    &mut self.doc.font_ctx.lock().unwrap(),
+                    &mut self.doc.layout_ctx,
+                    value.eq_ignore_ascii_case("password"),
+                );
+            }
+        }
 
         // Focusability is cached on the element and comes from these
         // attributes, so it has to follow a change to one of them: a widget
@@ -463,6 +482,17 @@ impl DocumentMutator<'_> {
 
         if name.local == local_name!("href") {
             element.flush_link_state();
+        }
+
+        // PATCH(diaryx): with no `type`, a password input is a text one.
+        if name.local == local_name!("type") {
+            if let Some(input_data) = element.text_input_data_mut() {
+                input_data.set_password(
+                    &mut self.doc.font_ctx.lock().unwrap(),
+                    &mut self.doc.layout_ctx,
+                    false,
+                );
+            }
         }
 
         // Update text input value

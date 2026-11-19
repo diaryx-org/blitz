@@ -135,6 +135,17 @@ Events and layout, found by diaryx-org/unit's gallery:
   own styles and faded to Firefox's `::placeholder` opacity (0.54); upstream
   gave it to the accessibility tree and never drew it, so a field showed
   nothing but its box.
+- A password input (`type=password`) draws a bullet for each character,
+  where upstream drew its text as typed and hid it only from assistive tech.
+  Its editor holds only the bullets, so only they are laid out, painted and
+  selected; the text is kept apart (`TextInputData::secret`), each edit's
+  insertion reconciled into it by the caret before and after, in a buffer
+  wiped when it changes and when it goes. It is the input's value (the
+  `input` event's, a form's, a script's), and its `value` attribute keeps
+  none of it once the input is laid out. It is not copied or cut, an input
+  method's composition is not drawn, and a change of `type` in and out of
+  `password` keeps its text and caret: a password shown and hidden. Found by
+  a KeePass client on diaryx-org/unit's components.
 
 From Diaryx, where leaf's editor cancels `mousedown` to keep its own caret
 and selection, and the app's labels are `user-select: none`:
