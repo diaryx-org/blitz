@@ -87,6 +87,8 @@ slotmap = { workspace = true }
 bitflags = { workspace = true }
 tracing = { workspace = true, optional = true }
 rayon = { workspace = true }
+# PATCH(diaryx): a password input's text, wiped as it changes and when it goes.
+zeroize = "1"
 
 # Media & Decoding
 image = { workspace = true }

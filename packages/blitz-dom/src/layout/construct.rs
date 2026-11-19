@@ -868,11 +868,16 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
         .map(|s| stylo_to_parley::base_direction(s.clone_direction(), s.clone_unicode_bidi()))
         .unwrap_or(parley::BaseDirection::Auto);
 
-    let initial_text = if is_multiline {
+    let mut initial_text = if is_multiline {
         node.text_content()
     } else {
         node.attr(local_name!("value")).unwrap_or("").to_string()
     };
+    // PATCH(diaryx): a password input draws bullets for its text.
+    let is_password = !is_multiline
+        && node
+            .attr(local_name!("type"))
+            .is_some_and(|t| t.eq_ignore_ascii_case("password"));
     let placeholder = node
         .attr(local_name!("placeholder"))
         .filter(|p| !p.is_empty())
@@ -882,12 +887,19 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
         let mut text_input_data = TextInputData::new(is_multiline);
         let editor = &mut text_input_data.editor;
         editor.set_text(&initial_text);
+        // PATCH(diaryx): a password's first text, wiped once in the editor.
+        zeroize::Zeroize::zeroize(&mut initial_text);
         element.special_data = SpecialElementData::TextInput(text_input_data);
     }
 
     let SpecialElementData::TextInput(text_input_data) = &mut element.special_data else {
         unreachable!();
     };
+    text_input_data.set_password(
+        &mut doc.font_ctx.lock().unwrap(),
+        &mut doc.layout_ctx,
+        is_password,
+    );
 
     let editor = &mut text_input_data.editor;
     editor.set_scale(doc.viewport.scale_f64() as f32);
