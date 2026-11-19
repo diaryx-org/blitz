@@ -31,19 +31,6 @@ pub use crate::window::{View, WindowConfig};
 #[cfg(feature = "data-uri")]
 pub use crate::net::DataUriNetProvider;
 
-#[cfg(all(
-    feature = "file-dialog",
-    any(
-        target_os = "windows",
-        target_os = "macos",
-        target_os = "linux",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    )
-))]
-use blitz_traits::shell::FileDialogFilter;
 use blitz_traits::shell::ShellProvider;
 use std::sync::Arc;
 use winit::cursor::{Cursor, CursorIcon};
@@ -202,34 +189,5 @@ impl ShellProvider for BlitzShellProvider {
         let mut cb = arboard::Clipboard::new().unwrap();
         cb.set_text(text.to_owned())
             .map_err(|_| blitz_traits::shell::ClipboardError)
-    }
-
-    #[cfg(all(
-        feature = "file-dialog",
-        any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux",
-            target_os = "dragonfly",
-            target_os = "freebsd",
-            target_os = "netbsd",
-            target_os = "openbsd"
-        )
-    ))]
-    fn open_file_dialog(
-        &self,
-        multiple: bool,
-        filter: Option<FileDialogFilter>,
-    ) -> Vec<std::path::PathBuf> {
-        let mut dialog = rfd::FileDialog::new();
-        if let Some(FileDialogFilter { name, extensions }) = filter {
-            dialog = dialog.add_filter(&name, &extensions);
-        }
-        let files = if multiple {
-            dialog.pick_files()
-        } else {
-            dialog.pick_file().map(|file| vec![file])
-        };
-        files.unwrap_or_default()
     }
 }

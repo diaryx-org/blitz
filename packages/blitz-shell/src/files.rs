@@ -5,16 +5,23 @@
 //! application hands to the document. The window keeps drawing while the
 //! picker is open, as a browser's does.
 //!
-//! - **macOS, Windows, Linux and the BSDs**: rfd's dialog, a sheet on the
-//!   window on the Mac and its child elsewhere, filtered by the input's
-//!   `accept`, opening in the folder the last file was chosen from. On
-//!   Linux, the desktop's own through its portal.
-//! - **iOS**: UIKit's document picker over the window ([`ios`]).
+//! Each platform's picker is written here, against the system's own API,
+//! with the same defaults: filtered by the input's `accept` (any file only
+//! when `accept` allows any), opening in the folder the last file was chosen
+//! from, attached to the window that asked.
+//!
+//! - **macOS, Windows**: rfd's dialog, a sheet on the window on the Mac and
+//!   its child on Windows.
+//! - **Linux and the BSDs** (`linux.rs`): the desktop's own picker, through
+//!   the XDG desktop portal over D-Bus (`dbus.rs`, a client of our own), or
+//!   zenity or kdialog where there is no portal.
+//! - **iOS** (`ios.rs`): UIKit's document picker over the window.
 //!
 //! Elsewhere there is no picker, and the document falls back to
 //! `ShellProvider::open_file_dialog`.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use blitz_traits::files::{ChosenFile, FileRequest};
 use blitz_traits::node_id::NodeId;
@@ -36,34 +43,80 @@ fn answer(
     });
 }
 
+/// The folder the last file was chosen from, which the next picker opens
+/// in, as a browser's does.
+static LAST_FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+#[allow(dead_code)]
+fn last_folder() -> Option<PathBuf> {
+    LAST_FOLDER.lock().ok().and_then(|f| f.clone())
+}
+
+/// The files a picker's paths are, its folder remembered for the next: a
+/// folder chosen for an input that chooses one (`webkitdirectory`) is its
+/// files, every one under it.
+#[allow(dead_code)]
+fn chosen(paths: Vec<PathBuf>, directory: bool) -> Vec<ChosenFile> {
+    let folder = if directory {
+        paths.first().cloned()
+    } else {
+        paths.first().and_then(|p| p.parent().map(PathBuf::from))
+    };
+    if let (Some(folder), Ok(mut last)) = (folder, LAST_FOLDER.lock()) {
+        *last = Some(folder);
+    }
+    paths
+        .into_iter()
+        .flat_map(|p| {
+            if directory {
+                ChosenFile::from_folder(&p)
+            } else {
+                ChosenFile::from_path(p).into_iter().collect()
+            }
+        })
+        .collect()
+}
+
+/// Run `pick` on a thread of its own, where it may wait on the system for
+/// as long as the person takes, and answer `target` with what it gives:
+/// `None` for a cancel (or a picker that failed).
+#[allow(dead_code)]
+fn on_thread(
+    window: &Arc<dyn Window>,
+    proxy: &BlitzShellProxy,
+    target: NodeId,
+    directory: bool,
+    pick: impl FnOnce() -> Option<Vec<PathBuf>> + Send + 'static,
+) -> bool {
+    let proxy = proxy.clone();
+    let window = window.clone();
+    std::thread::Builder::new()
+        .name("blitz-file-picker".into())
+        .spawn(move || {
+            let files = pick()
+                .map(|paths| chosen(paths, directory))
+                .filter(|f| !f.is_empty());
+            answer(&proxy, &*window, target, files);
+        })
+        .is_ok()
+}
+
 #[cfg(all(
     feature = "file-dialog",
-    any(
-        target_os = "windows",
-        target_os = "macos",
-        target_os = "linux",
-        target_os = "dragonfly",
-        target_os = "freebsd",
-        target_os = "netbsd",
-        target_os = "openbsd"
-    )
+    any(target_os = "windows", target_os = "macos")
 ))]
 mod desktop {
     use std::future::Future;
     use std::path::PathBuf;
     use std::pin::Pin;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::task::{Context, Poll, Wake, Waker};
 
-    use blitz_traits::files::{ChosenFile, FileRequest};
+    use blitz_traits::files::FileRequest;
     use blitz_traits::node_id::NodeId;
     use winit::window::Window;
 
     use crate::BlitzShellProxy;
-
-    /// The folder the last file was chosen from, which the next picker
-    /// opens in, as a browser's does.
-    static LAST_FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
 
     type Picked = Option<Vec<rfd::FileHandle>>;
 
@@ -78,7 +131,7 @@ mod desktop {
         if !extensions.is_empty() && !request.directory {
             dialog = dialog.add_filter(request.filter_name(), &extensions);
         }
-        if let Some(folder) = LAST_FOLDER.lock().ok().and_then(|f| f.clone()) {
+        if let Some(folder) = super::last_folder() {
             dialog = dialog.set_directory(folder);
         }
         let picking: Pin<Box<dyn Future<Output = Picked> + Send>> = if request.directory {
@@ -90,42 +143,19 @@ mod desktop {
             let f = dialog.pick_file();
             Box::pin(async move { f.await.map(|h| vec![h]) })
         };
-        let proxy = proxy.clone();
-        let window = window.clone();
-        let spawned = std::thread::Builder::new()
-            .name("blitz-file-picker".into())
-            .spawn(move || {
-                let picked = block_on(picking);
-                let files = picked.map(|handles| {
-                    let paths: Vec<PathBuf> =
-                        handles.iter().map(|h| h.path().to_path_buf()).collect();
-                    let folder = if request.directory {
-                        paths.first().cloned()
-                    } else {
-                        paths.first().and_then(|p| p.parent().map(PathBuf::from))
-                    };
-                    if let (Some(folder), Ok(mut last)) = (folder, LAST_FOLDER.lock()) {
-                        *last = Some(folder);
-                    }
-                    paths
-                        .into_iter()
-                        .flat_map(|p| {
-                            if request.directory {
-                                ChosenFile::from_folder(&p)
-                            } else {
-                                ChosenFile::from_path(p).into_iter().collect()
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                });
-                super::answer(&proxy, &*window, target, files);
-            });
-        spawned.is_ok()
+        super::on_thread(window, proxy, target, request.directory, move || {
+            block_on(picking).map(|handles| {
+                handles
+                    .iter()
+                    .map(|h| h.path().to_path_buf())
+                    .collect::<Vec<PathBuf>>()
+            })
+        })
     }
 
     /// Wait for `future` on this thread: a picker's, whose own backend does
-    /// the waiting (a sheet's completion on the Mac, a portal's response on
-    /// Linux, a thread of its own on Windows).
+    /// the waiting (a sheet's completion on the Mac, a thread of its own on
+    /// Windows).
     fn block_on<T>(future: impl Future<Output = T>) -> T {
         struct Unpark(std::thread::Thread);
         impl Wake for Unpark {
@@ -145,6 +175,29 @@ mod desktop {
     }
 }
 
+#[cfg(all(
+    feature = "file-dialog",
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )
+))]
+mod dbus;
+#[cfg(all(
+    feature = "file-dialog",
+    any(
+        target_os = "linux",
+        target_os = "dragonfly",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd"
+    )
+))]
+mod linux;
+
 #[cfg(target_os = "ios")]
 mod ios;
 
@@ -159,9 +212,12 @@ pub(crate) fn pick(
 ) -> bool {
     #[cfg(all(
         feature = "file-dialog",
+        any(target_os = "windows", target_os = "macos")
+    ))]
+    return desktop::pick(window, proxy, target, request);
+    #[cfg(all(
+        feature = "file-dialog",
         any(
-            target_os = "windows",
-            target_os = "macos",
             target_os = "linux",
             target_os = "dragonfly",
             target_os = "freebsd",
@@ -169,7 +225,7 @@ pub(crate) fn pick(
             target_os = "openbsd"
         )
     ))]
-    return desktop::pick(window, proxy, target, request);
+    return linux::pick(window, proxy, target, request);
     #[cfg(target_os = "ios")]
     return ios::pick(window, proxy, target, request);
     #[allow(unreachable_code)]

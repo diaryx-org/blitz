@@ -75,8 +75,10 @@ android-activity = { version = "0.6.0" }
 arboard = { workspace = true, optional = true }
 
 
-[target.'cfg(any(target_os = "windows",target_os = "macos",target_os = "linux",target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
-rfd = { workspace = true, optional = true, features = ["xdg-portal"] }
+# The Mac's and Windows' pickers, until our own replace them (src/files.rs):
+# Linux and the BSDs have theirs, through the portal (src/files/linux.rs).
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+rfd = { workspace = true, optional = true, default-features = false }
 
 [package.metadata.docs.rs]
 all-features = true
