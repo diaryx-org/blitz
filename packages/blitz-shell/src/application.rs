@@ -104,6 +104,13 @@ impl<Rend: WindowRenderer> BlitzApplication<Rend> {
                 target,
                 files,
             } => {
+                #[cfg(feature = "tracing")]
+                tracing::info!(
+                    "files chosen for {target:?}: {:?}",
+                    files
+                        .as_ref()
+                        .map(|f| f.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+                );
                 if let Some(window) = self.windows.get_mut(&window_id) {
                     window.files_chosen(target, files);
                 }

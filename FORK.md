@@ -157,6 +157,12 @@ Events and layout, found by diaryx-org/unit's gallery:
   the window as parent on X11; `zenity`, else `kdialog`, where there is no
   portal. Run here against a real dbus-daemon, xdg-desktop-portal-gtk and
   zenity 4.
+- On the web, with Blitz drawing into a canvas, a file input's picker is
+  the browser's own: the page is given a hidden `<input type=file>` of its
+  own with the input's `accept`, `multiple` and `webkitdirectory`, clicked
+  while the press still lets a page open a picker, and its files are read
+  whole (`packages/blitz-shell/src/files/web.rs`). Checked in Chromium:
+  the press opened its chooser, and the file chosen reached the document.
 - On Windows, a file input's picker is the Common Item Dialog
   (`IFileOpenDialog`), its COM interfaces declared by hand on windows-sys
   (`packages/blitz-shell/src/files/windows.rs`), not rfd's: owned by the

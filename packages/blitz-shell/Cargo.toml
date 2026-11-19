@@ -51,8 +51,15 @@ data-url = { workspace = true, optional = true }
 web-time = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { workspace = true, features = ["HtmlCanvasElement", "Window"] }
+web-sys = { workspace = true, features = [
+    "HtmlCanvasElement", "Window",
+    # PATCH(diaryx): the browser's picker, for a file input (src/files/web.rs).
+    "Document", "Element", "HtmlElement", "HtmlInputElement", "Node", "EventTarget",
+    "File", "FileList", "Blob",
+] }
 wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = "0.3"
 
 # PATCH(diaryx): UIKit's document picker, for a file input (src/files/ios.rs).
 [target.'cfg(target_os = "ios")'.dependencies]
