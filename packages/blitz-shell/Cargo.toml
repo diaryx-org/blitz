@@ -23,7 +23,7 @@ clipboard = ["dep:arboard"]
 tracing = ["dep:tracing", "blitz-dom/tracing"]
 # The system's picker for `<input type=file>` (src/files.rs), and the file
 # input itself in blitz-dom, which is inert without it.
-file-dialog = ["dep:rfd", "blitz-dom/file-input"]
+file-dialog = ["blitz-dom/file-input"]
 # Enables a data-uri-only NetProvider. Only needed if you aren't using the regular NetProvider
 data-uri = ["dep:data-url"]
 custom-widget = ["blitz-dom/custom-widget"]
@@ -90,10 +90,13 @@ objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, 
     "std", "UTType", "UTCoreTypes",
 ] }
 
-# Windows' picker, until our own replaces it (src/files.rs): the Mac, Linux
-# and the BSDs have theirs.
+# PATCH(diaryx): the Common Item Dialog, for a file input
+# (src/files/windows.rs): COM's functions and the dialog's types, its
+# interfaces declared by hand. The version winit builds.
 [target.'cfg(target_os = "windows")'.dependencies]
-rfd = { workspace = true, optional = true, default-features = false }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common",
+] }
 
 [package.metadata.docs.rs]
 all-features = true
