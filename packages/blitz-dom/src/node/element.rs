@@ -944,12 +944,17 @@ impl std::fmt::Debug for ListItemLayout {
 #[cfg(feature = "file-input")]
 mod file_data {
     use std::ops::{Deref, DerefMut};
-    use std::path::PathBuf;
 
+    use blitz_traits::files::ChosenFile;
+
+    // PATCH(diaryx): a file input's files, with their names, sizes, types
+    // and contents, rather than paths alone, which a browser's or a phone's
+    // picker does not have.
+    /// The files a file input holds.
     #[derive(Clone, Debug)]
-    pub struct FileData(pub Vec<PathBuf>);
+    pub struct FileData(pub Vec<ChosenFile>);
     impl Deref for FileData {
-        type Target = Vec<PathBuf>;
+        type Target = Vec<ChosenFile>;
 
         fn deref(&self) -> &Self::Target {
             &self.0
@@ -960,8 +965,8 @@ mod file_data {
             &mut self.0
         }
     }
-    impl From<Vec<PathBuf>> for FileData {
-        fn from(files: Vec<PathBuf>) -> Self {
+    impl From<Vec<ChosenFile>> for FileData {
+        fn from(files: Vec<ChosenFile>) -> Self {
             Self(files)
         }
     }

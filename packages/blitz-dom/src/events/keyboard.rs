@@ -120,7 +120,10 @@ impl BaseDocument {
                 let value = input_data.value().to_string();
                 dispatch_event(DomEvent::new(
                     node_id,
-                    DomEventData::Input(BlitzInputEvent { value }),
+                    DomEventData::Input(BlitzInputEvent {
+                        value,
+                        files: Vec::new(),
+                    }),
                 ));
                 self.shell_provider.request_redraw();
             }

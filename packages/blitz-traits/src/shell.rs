@@ -42,6 +42,18 @@ pub trait ShellProvider: Send + Sync + 'static {
         vec![]
     }
 
+    // PATCH(diaryx): a picker that answers later.
+    /// Show the system's file picker for the file input `target`, and
+    /// answer later with [`UiEvent::FilesChosen`](crate::events::UiEvent::FilesChosen)
+    /// for `target`, through the document's `handle_ui_event`: a picker never
+    /// holds up the window while it is open. False where the shell has no
+    /// picker to show, and the document then asks [`Self::open_file_dialog`],
+    /// which answers at once.
+    fn pick_files(&self, target: crate::NodeId, request: crate::files::FileRequest) -> bool {
+        let _ = (target, request);
+        false
+    }
+
     // Window chrome controls, for documents that draw their own titlebar
     // (e.g. a frameless window with an HTML titlebar).
     fn request_window_close(&self) {}

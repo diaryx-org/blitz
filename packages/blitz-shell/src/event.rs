@@ -41,6 +41,15 @@ pub enum BlitzShellEvent {
     /// An arbitary event from the Blitz embedder
     Embedder(Arc<dyn Any + Send + Sync>),
 
+    // PATCH(diaryx): a file picker's answer.
+    /// The system's file picker has answered the file input `target` in
+    /// `window_id`: the files chosen, or `None` if it was cancelled.
+    FilesChosen {
+        window_id: WindowId,
+        target: blitz_traits::node_id::NodeId,
+        files: Option<Vec<blitz_traits::files::ChosenFile>>,
+    },
+
     /// Navigate to another URL (triggered by e.g. clicking a link)
     Navigate(Box<NavigationOptions>),
 

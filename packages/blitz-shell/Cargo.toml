@@ -21,7 +21,9 @@ accessibility = [
 ]
 clipboard = ["dep:arboard"]
 tracing = ["dep:tracing", "blitz-dom/tracing"]
-file-dialog = ["dep:rfd"]
+# The system's picker for `<input type=file>` (src/files.rs), and the file
+# input itself in blitz-dom, which is inert without it.
+file-dialog = ["dep:rfd", "blitz-dom/file-input"]
 # Enables a data-uri-only NetProvider. Only needed if you aren't using the regular NetProvider
 data-uri = ["dep:data-url"]
 custom-widget = ["blitz-dom/custom-widget"]

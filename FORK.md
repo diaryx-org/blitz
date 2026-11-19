@@ -53,13 +53,17 @@ ones `leaf` changes: they depend on each other by path, so one taken from
 crates.io beside them is a second copy of it, and the build fails on two
 `blitz-traits`. Cargo warns of a patch the graph does not use; drop it.
 
-Not `dioxus-native-dom`, nor this repository's `packages/dioxus-native`:
+Not this repository's `packages/dioxus-native` and `packages/dioxus-native-dom`:
 those are an older line (0.7) than the published 0.8 alphas. The published
 dioxus-native is patched here, in `patches/dioxus-native` (its `PATCH.md`),
-for an app that opens more than one window:
+for an app that opens more than one window; and the published
+dioxus-native-dom, in `patches/dioxus-native-dom`, which every app needs,
+as `leaf`'s events no longer compile with the published one (its
+`PATCH.md`):
 
 ```toml
 dioxus-native = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+dioxus-native-dom = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 ```
 
 ## Keeping it
@@ -131,6 +135,20 @@ Events and layout, found by diaryx-org/unit's gallery:
   the root element as a box with no containing block, which dioxus-native's
   root element has (a node above it that is not an element), so a page's
   menus, dialogs and sheets scrolled off with the page.
+- `<input type=file>` works, for a page and on every platform with a
+  picker (`packages/blitz-shell/src/files.rs`). A press asks the shell for
+  the system's picker and returns, so the window keeps drawing; upstream
+  opened rfd's blocking dialog in the press, ignored `accept`, and told the
+  page nothing. The input's `accept` (extensions, MIME types, `image/*`),
+  `multiple` and `webkitdirectory` reach the picker, which opens on the
+  window and in the folder the last file came from. The answer comes back
+  as `UiEvent::FilesChosen`: the files, with their names, sizes, types and
+  contents (`blitz_traits::files::ChosenFile`; a path, or the bytes a
+  picker handed over), then `input` and `change`, or `cancel`, as a
+  browser fires them; files `accept` does not allow are left out, and the
+  `value` is a browser's (`C:\fakepath\…`). The page reads them through
+  Dioxus's `files()` (`patches/dioxus-native-dom`). Found by a KeePass
+  client on diaryx-org/unit's components, choosing a database.
 - An empty text input or textarea paints its `placeholder`, laid out in its
   own styles and faded to Firefox's `::placeholder` opacity (0.54); upstream
   gave it to the accessibility tree and never drew it, so a field showed

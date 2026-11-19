@@ -1316,8 +1316,10 @@ impl<'doc> DocumentMutator<'doc> {
                 ],
             );
             let label_id = self.create_element(qual_name!("label", html), vec![]);
-            let text_id = self.create_text_node("No File Selected");
-            let button_text_id = self.create_text_node("Browse");
+            // PATCH(diaryx): a browser's words (`events/file_input.rs`
+            // keeps the label after a choice).
+            let text_id = self.create_text_node("No file chosen");
+            let button_text_id = self.create_text_node("Choose File");
             self.append_children(target_id, &[button_id, label_id]);
             self.append_children(label_id, &[text_id]);
             self.append_children(button_id, &[button_text_id]);

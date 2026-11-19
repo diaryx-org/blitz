@@ -11,6 +11,7 @@
 mod application;
 mod convert_events;
 mod event;
+mod files;
 mod net;
 mod wheel;
 mod window;
@@ -156,6 +157,15 @@ impl ShellProvider for BlitzShellProvider {
     }
     fn drag_window(&self) {
         let _ = self.window.drag_window();
+    }
+
+    // PATCH(diaryx): the system's picker, answered later (`files.rs`).
+    fn pick_files(
+        &self,
+        target: blitz_traits::node_id::NodeId,
+        request: blitz_traits::files::FileRequest,
+    ) -> bool {
+        crate::files::pick(&self.window, &self.proxy, target, request)
     }
 
     #[cfg(all(
