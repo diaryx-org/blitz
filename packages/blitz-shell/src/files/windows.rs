@@ -311,7 +311,7 @@ fn show(owner: HWND, request: &FileRequest, folder: Option<&Path>) -> Option<Vec
 pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     // An HWND is a number; it crosses to the dialog's thread as one.
     let owner = owner(&**window) as isize;
-    let folder = super::last_folder();
+    let folder = request.folder.clone().or_else(super::last_folder);
     let directory = request.directory;
     super::on_thread(
         directory,

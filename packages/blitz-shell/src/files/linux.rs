@@ -28,7 +28,7 @@ use super::dbus::{Bus, Call, METHOD_RETURN, SIGNAL, Value};
 
 pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     let parent = parent_window(&**window);
-    let folder = super::last_folder();
+    let folder = request.folder.clone().or_else(super::last_folder);
     let directory = request.directory;
     super::on_thread(
         directory,
