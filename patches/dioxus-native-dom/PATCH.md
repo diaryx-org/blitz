@@ -9,10 +9,12 @@ Consumers take it with `[patch.crates-io]` in their root manifest, from this
 repository's branch the rest of their Blitz comes from:
 
 ```toml
-dioxus-native-dom = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+dioxus-native-dom = { git = "https://github.com/diaryx-org/blitz", branch = "leaf", version = "0.8.0-alpha.3" }
 ```
 
-Every app on this fork's `leaf` needs it, not only one that uses a file
+Its `version` picks it out from this repository's older
+`packages/dioxus-native-dom` (0.7), of the same name. Every app on this
+fork's `leaf` needs it, not only one that uses a file
 input: `leaf`'s blitz-traits has events the published crate does not match
 (it matches Blitz's `DomEventData` exhaustively), so the published crate no
 longer compiles against it.

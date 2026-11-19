@@ -62,9 +62,12 @@ as `leaf`'s events no longer compile with the published one (its
 `PATCH.md`):
 
 ```toml
-dioxus-native = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
-dioxus-native-dom = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+dioxus-native = { git = "https://github.com/diaryx-org/blitz", branch = "leaf", version = "0.8.0-alpha.3" }
+dioxus-native-dom = { git = "https://github.com/diaryx-org/blitz", branch = "leaf", version = "0.8.0-alpha.3" }
 ```
+
+Each with its `version`: the repository holds the older line under the same
+names (`packages/`), and without it Cargo finds two candidates and stops.
 
 ## Keeping it
 
