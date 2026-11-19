@@ -149,6 +149,14 @@ Events and layout, found by diaryx-org/unit's gallery:
   `value` is a browser's (`C:\fakepath\…`). The page reads them through
   Dioxus's `files()` (`patches/dioxus-native-dom`). Found by a KeePass
   client on diaryx-org/unit's components, choosing a database.
+- On Linux and the BSDs, a file input's picker is the desktop's own, through
+  the XDG desktop portal's FileChooser, over a D-Bus client of our own
+  (`packages/blitz-shell/src/files/dbus.rs`: the session bus, EXTERNAL
+  authentication, and the wire format of the types the portal uses), not
+  rfd's: `accept` as globs in either case and as MIME types, the last folder,
+  the window as parent on X11; `zenity`, else `kdialog`, where there is no
+  portal. Run here against a real dbus-daemon, xdg-desktop-portal-gtk and
+  zenity 4.
 - On iOS, a file input's picker is UIKit's document picker, presented over
   the window (`packages/blitz-shell/src/files/ios.rs`): `accept` as UTTypes,
   files taken as copies the app reads by path, a folder's files read while
