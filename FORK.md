@@ -157,6 +157,12 @@ Events and layout, found by diaryx-org/unit's gallery:
   the window as parent on X11; `zenity`, else `kdialog`, where there is no
   portal. Run here against a real dbus-daemon, xdg-desktop-portal-gtk and
   zenity 4.
+- On Windows, a file input's picker is the Common Item Dialog
+  (`IFileOpenDialog`), its COM interfaces declared by hand on windows-sys
+  (`packages/blitz-shell/src/files/windows.rs`), not rfd's: owned by the
+  window, on a thread and apartment of its own, `accept` as one filter, the
+  last folder, folders for `webkitdirectory`. blitz-shell no longer takes
+  rfd at all.
 - On macOS, a file input's picker is AppKit's open panel of our own, not
   rfd's: a sheet on the window, `accept` as UTTypes (shared with iOS's,
   `packages/blitz-shell/src/files/uttypes.rs`), folders alone for

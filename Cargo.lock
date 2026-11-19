@@ -1065,11 +1065,11 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-ui-kit",
  "objc2-uniform-type-identifiers",
- "rfd",
  "tracing",
  "wasm-bindgen",
  "web-sys",
  "web-time",
+ "windows-sys 0.61.2",
  "winit",
 ]
 

@@ -11,7 +11,8 @@
 //! from, attached to the window that asked.
 //!
 //! - **macOS** (`macos.rs`): AppKit's open panel, a sheet on the window.
-//! - **Windows**: rfd's dialog, the window's child.
+//! - **Windows** (`windows.rs`): the Common Item Dialog, the window's
+//!   child, through COM interfaces declared by hand.
 //! - **Linux and the BSDs** (`linux.rs`): the desktop's own picker, through
 //!   the XDG desktop portal over D-Bus (`dbus.rs`, a client of our own), or
 //!   zenity or kdialog where there is no portal.
@@ -102,74 +103,7 @@ fn on_thread(
 }
 
 #[cfg(all(feature = "file-dialog", target_os = "windows"))]
-mod desktop {
-    use std::future::Future;
-    use std::path::PathBuf;
-    use std::pin::Pin;
-    use std::sync::Arc;
-    use std::task::{Context, Poll, Wake, Waker};
-
-    use blitz_traits::files::FileRequest;
-    use blitz_traits::node_id::NodeId;
-    use winit::window::Window;
-
-    use crate::BlitzShellProxy;
-
-    type Picked = Option<Vec<rfd::FileHandle>>;
-
-    pub(super) fn pick(
-        window: &Arc<dyn Window>,
-        proxy: &BlitzShellProxy,
-        target: NodeId,
-        request: FileRequest,
-    ) -> bool {
-        let mut dialog = rfd::AsyncFileDialog::new().set_parent(&**window);
-        let extensions = request.extensions();
-        if !extensions.is_empty() && !request.directory {
-            dialog = dialog.add_filter(request.filter_name(), &extensions);
-        }
-        if let Some(folder) = super::last_folder() {
-            dialog = dialog.set_directory(folder);
-        }
-        let picking: Pin<Box<dyn Future<Output = Picked> + Send>> = if request.directory {
-            let f = dialog.pick_folder();
-            Box::pin(async move { f.await.map(|h| vec![h]) })
-        } else if request.multiple {
-            Box::pin(dialog.pick_files())
-        } else {
-            let f = dialog.pick_file();
-            Box::pin(async move { f.await.map(|h| vec![h]) })
-        };
-        super::on_thread(window, proxy, target, request.directory, move || {
-            block_on(picking).map(|handles| {
-                handles
-                    .iter()
-                    .map(|h| h.path().to_path_buf())
-                    .collect::<Vec<PathBuf>>()
-            })
-        })
-    }
-
-    /// Wait for `future` on this thread: a picker's, whose own backend does
-    /// the waiting (a thread of its own, on Windows).
-    fn block_on<T>(future: impl Future<Output = T>) -> T {
-        struct Unpark(std::thread::Thread);
-        impl Wake for Unpark {
-            fn wake(self: Arc<Self>) {
-                self.0.unpark();
-            }
-        }
-        let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
-        let mut cx = Context::from_waker(&waker);
-        let mut future = std::pin::pin!(future);
-        loop {
-            if let Poll::Ready(v) = future.as_mut().poll(&mut cx) {
-                return v;
-            }
-            std::thread::park();
-        }
-    }
-}
+mod windows;
 
 #[cfg(all(
     feature = "file-dialog",
@@ -211,7 +145,7 @@ pub(crate) fn pick(
     request: FileRequest,
 ) -> bool {
     #[cfg(all(feature = "file-dialog", target_os = "windows"))]
-    return desktop::pick(window, proxy, target, request);
+    return windows::pick(window, proxy, target, request);
     #[cfg(all(feature = "file-dialog", target_os = "macos"))]
     return macos::pick(window, proxy, target, request);
     #[cfg(all(
