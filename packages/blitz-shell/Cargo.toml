@@ -75,9 +75,24 @@ android-activity = { version = "0.6.0" }
 arboard = { workspace = true, optional = true }
 
 
-# The Mac's and Windows' pickers, until our own replace them (src/files.rs):
-# Linux and the BSDs have theirs, through the portal (src/files/linux.rs).
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+# PATCH(diaryx): AppKit's open panel, for a file input (src/files/macos.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std", "NSArray", "NSObject", "NSString", "NSURL",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std", "block2", "NSApplication", "NSOpenPanel", "NSSavePanel", "NSPanel",
+    "NSWindow", "NSResponder", "NSView", "objc2-uniform-type-identifiers",
+] }
+objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = [
+    "std", "UTType", "UTCoreTypes",
+] }
+
+# Windows' picker, until our own replaces it (src/files.rs): the Mac, Linux
+# and the BSDs have theirs.
+[target.'cfg(target_os = "windows")'.dependencies]
 rfd = { workspace = true, optional = true, default-features = false }
 
 [package.metadata.docs.rs]

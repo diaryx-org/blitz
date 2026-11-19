@@ -1056,10 +1056,12 @@ dependencies = [
  "blitz-dom",
  "blitz-paint",
  "blitz-traits",
+ "block2 0.6.2",
  "data-url",
  "futures-util",
  "keyboard-types 0.8.3",
  "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-ui-kit",
  "objc2-uniform-type-identifiers",
@@ -5787,6 +5789,7 @@ dependencies = [
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
+ "objc2-uniform-type-identifiers",
 ]
 
 [[package]]

@@ -157,6 +157,10 @@ Events and layout, found by diaryx-org/unit's gallery:
   the window as parent on X11; `zenity`, else `kdialog`, where there is no
   portal. Run here against a real dbus-daemon, xdg-desktop-portal-gtk and
   zenity 4.
+- On macOS, a file input's picker is AppKit's open panel of our own, not
+  rfd's: a sheet on the window, `accept` as UTTypes (shared with iOS's,
+  `packages/blitz-shell/src/files/uttypes.rs`), folders alone for
+  `webkitdirectory`, the last folder.
 - On iOS, a file input's picker is UIKit's document picker, presented over
   the window (`packages/blitz-shell/src/files/ios.rs`): `accept` as UTTypes,
   files taken as copies the app reads by path, a folder's files read while

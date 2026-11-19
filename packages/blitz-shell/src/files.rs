@@ -10,8 +10,8 @@
 //! when `accept` allows any), opening in the folder the last file was chosen
 //! from, attached to the window that asked.
 //!
-//! - **macOS, Windows**: rfd's dialog, a sheet on the window on the Mac and
-//!   its child on Windows.
+//! - **macOS** (`macos.rs`): AppKit's open panel, a sheet on the window.
+//! - **Windows**: rfd's dialog, the window's child.
 //! - **Linux and the BSDs** (`linux.rs`): the desktop's own picker, through
 //!   the XDG desktop portal over D-Bus (`dbus.rs`, a client of our own), or
 //!   zenity or kdialog where there is no portal.
@@ -101,10 +101,7 @@ fn on_thread(
         .is_ok()
 }
 
-#[cfg(all(
-    feature = "file-dialog",
-    any(target_os = "windows", target_os = "macos")
-))]
+#[cfg(all(feature = "file-dialog", target_os = "windows"))]
 mod desktop {
     use std::future::Future;
     use std::path::PathBuf;
@@ -154,8 +151,7 @@ mod desktop {
     }
 
     /// Wait for `future` on this thread: a picker's, whose own backend does
-    /// the waiting (a sheet's completion on the Mac, a thread of its own on
-    /// Windows).
+    /// the waiting (a thread of its own, on Windows).
     fn block_on<T>(future: impl Future<Output = T>) -> T {
         struct Unpark(std::thread::Thread);
         impl Wake for Unpark {
@@ -200,6 +196,10 @@ mod linux;
 
 #[cfg(target_os = "ios")]
 mod ios;
+#[cfg(all(feature = "file-dialog", target_os = "macos"))]
+mod macos;
+#[cfg(any(target_os = "ios", all(feature = "file-dialog", target_os = "macos")))]
+mod uttypes;
 
 /// Show the system's picker for the file input `target` in `window`, and
 /// answer through `proxy`. False where there is none.
@@ -210,11 +210,10 @@ pub(crate) fn pick(
     target: NodeId,
     request: FileRequest,
 ) -> bool {
-    #[cfg(all(
-        feature = "file-dialog",
-        any(target_os = "windows", target_os = "macos")
-    ))]
+    #[cfg(all(feature = "file-dialog", target_os = "windows"))]
     return desktop::pick(window, proxy, target, request);
+    #[cfg(all(feature = "file-dialog", target_os = "macos"))]
+    return macos::pick(window, proxy, target, request);
     #[cfg(all(
         feature = "file-dialog",
         any(
