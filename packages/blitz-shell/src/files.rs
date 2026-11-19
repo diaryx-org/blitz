@@ -32,19 +32,10 @@ use winit::window::Window;
 
 use crate::{BlitzShellEvent, BlitzShellProxy};
 
-/// The answer for `target`, to the window that asked.
-fn answer(
-    proxy: &BlitzShellProxy,
-    window: &dyn Window,
-    target: NodeId,
-    files: Option<Vec<ChosenFile>>,
-) {
-    proxy.send_event(BlitzShellEvent::FilesChosen {
-        window_id: window.id(),
-        target,
-        files,
-    });
-}
+/// Where a picker's answer goes, once: the files chosen, or `None` for a
+/// cancel (or a picker that failed). To a file input ([`pick`]), or to code
+/// waiting for it ([`choose_files`]).
+pub(crate) type Answer = Box<dyn FnOnce(Option<Vec<ChosenFile>>) + Send>;
 
 /// The folder the last file was chosen from, which the next picker opens
 /// in, as a browser's does.
@@ -81,25 +72,21 @@ fn chosen(paths: Vec<PathBuf>, directory: bool) -> Vec<ChosenFile> {
 }
 
 /// Run `pick` on a thread of its own, where it may wait on the system for
-/// as long as the person takes, and answer `target` with what it gives:
-/// `None` for a cancel (or a picker that failed).
+/// as long as the person takes, and `answer` with what it gives: `None` for
+/// a cancel (or a picker that failed).
 #[allow(dead_code)]
 fn on_thread(
-    window: &Arc<dyn Window>,
-    proxy: &BlitzShellProxy,
-    target: NodeId,
     directory: bool,
     pick: impl FnOnce() -> Option<Vec<PathBuf>> + Send + 'static,
+    answer: Answer,
 ) -> bool {
-    let proxy = proxy.clone();
-    let window = window.clone();
     std::thread::Builder::new()
         .name("blitz-file-picker".into())
         .spawn(move || {
             let files = pick()
                 .map(|paths| chosen(paths, directory))
                 .filter(|f| !f.is_empty());
-            answer(&proxy, &*window, target, files);
+            answer(files);
         })
         .is_ok()
 }
@@ -140,18 +127,91 @@ mod uttypes;
 mod web;
 
 /// Show the system's picker for the file input `target` in `window`, and
-/// answer through `proxy`. False where there is none.
-#[allow(unused_variables)]
+/// answer it through `proxy` ([`BlitzShellEvent::FilesChosen`]). False
+/// where there is none.
 pub(crate) fn pick(
     window: &Arc<dyn Window>,
     proxy: &BlitzShellProxy,
     target: NodeId,
     request: FileRequest,
 ) -> bool {
+    let proxy = proxy.clone();
+    let window_id = window.id();
+    show(
+        window,
+        request,
+        Box::new(move |files| {
+            proxy.send_event(BlitzShellEvent::FilesChosen {
+                window_id,
+                target,
+                files,
+            })
+        }),
+    )
+}
+
+/// Show the system's picker over `window` for `request`, and wait for the
+/// files chosen: `None` for a cancel, or where there is no picker. For a
+/// picker a page's own code opens (a menu's Open…, a shortcut), where there
+/// is no file input to press; it opens as a file input's would, with the
+/// same defaults.
+///
+/// On the web, a browser opens a picker only during a press: call this from
+/// a press's handler there.
+pub fn choose_files(window: &Arc<dyn Window>, request: FileRequest) -> ChooseFiles {
+    let slot: Slot = Arc::new(Mutex::new((None, None)));
+    let answer: Answer = {
+        let slot = slot.clone();
+        Box::new(move |files| ChooseFiles::fill(&slot, files))
+    };
+    if !show(window, request, answer) {
+        ChooseFiles::fill(&slot, None);
+    }
+    ChooseFiles(slot)
+}
+
+type Slot = Arc<Mutex<(Option<Option<Vec<ChosenFile>>>, Option<std::task::Waker>)>>;
+
+/// The files [`choose_files`] waits for.
+pub struct ChooseFiles(Slot);
+
+impl ChooseFiles {
+    fn fill(slot: &Slot, files: Option<Vec<ChosenFile>>) {
+        let Ok(mut s) = slot.lock() else { return };
+        s.0 = Some(files);
+        if let Some(w) = s.1.take() {
+            w.wake();
+        }
+    }
+}
+
+impl std::future::Future for ChooseFiles {
+    type Output = Option<Vec<ChosenFile>>;
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        let Ok(mut s) = self.0.lock() else {
+            return std::task::Poll::Ready(None);
+        };
+        match s.0.take() {
+            Some(files) => std::task::Poll::Ready(files),
+            None => {
+                s.1 = Some(cx.waker().clone());
+                std::task::Poll::Pending
+            }
+        }
+    }
+}
+
+/// Show the system's picker over `window`, giving its answer to `answer`.
+/// False where there is none (and `answer` is dropped, uncalled).
+#[allow(unused_variables)]
+fn show(window: &Arc<dyn Window>, request: FileRequest, answer: Answer) -> bool {
     #[cfg(all(feature = "file-dialog", target_os = "windows"))]
-    return windows::pick(window, proxy, target, request);
+    return windows::pick(window, request, answer);
     #[cfg(all(feature = "file-dialog", target_os = "macos"))]
-    return macos::pick(window, proxy, target, request);
+    return macos::pick(window, request, answer);
     #[cfg(all(
         feature = "file-dialog",
         any(
@@ -162,11 +222,11 @@ pub(crate) fn pick(
             target_os = "openbsd"
         )
     ))]
-    return linux::pick(window, proxy, target, request);
+    return linux::pick(window, request, answer);
     #[cfg(target_os = "ios")]
-    return ios::pick(window, proxy, target, request);
+    return ios::pick(window, request, answer);
     #[cfg(all(feature = "file-dialog", target_arch = "wasm32"))]
-    return web::pick(window, proxy, target, request);
+    return web::pick(window, request, answer);
     #[allow(unreachable_code)]
     false
 }

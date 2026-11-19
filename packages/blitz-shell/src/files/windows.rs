@@ -23,7 +23,6 @@ use std::ptr::null_mut;
 use std::sync::Arc;
 
 use blitz_traits::files::FileRequest;
-use blitz_traits::node_id::NodeId;
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance,
@@ -37,8 +36,6 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::core::{GUID, HRESULT, PCWSTR, PWSTR};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
-
-use crate::BlitzShellProxy;
 
 const IID_IFILEOPENDIALOG: GUID = GUID::from_u128(0xd57c7288_d4ad_4768_be02_9d969532d960);
 const IID_ISHELLITEM: GUID = GUID::from_u128(0x43826d1e_e718_42ee_bc55_a1e261c37bfe);
@@ -311,19 +308,16 @@ fn show(owner: HWND, request: &FileRequest, folder: Option<&Path>) -> Option<Vec
     }
 }
 
-pub(super) fn pick(
-    window: &Arc<dyn Window>,
-    proxy: &BlitzShellProxy,
-    target: NodeId,
-    request: FileRequest,
-) -> bool {
+pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     // An HWND is a number; it crosses to the dialog's thread as one.
     let owner = owner(&**window) as isize;
     let folder = super::last_folder();
     let directory = request.directory;
-    super::on_thread(window, proxy, target, directory, move || {
-        show(owner as HWND, &request, folder.as_deref())
-    })
+    super::on_thread(
+        directory,
+        move || show(owner as HWND, &request, folder.as_deref()),
+        answer,
+    )
 }
 
 #[cfg(test)]

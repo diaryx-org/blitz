@@ -13,7 +13,7 @@
 //!   handed over whole.
 //!
 //! The answer goes back to the window as every picker's does
-//! ([`super::answer`]): the delegate's callbacks run on the main thread,
+//! (`files.rs`'s `Answer`): the delegate's callbacks run on the main thread,
 //! where the event loop does.
 
 use std::cell::{Cell, RefCell};
@@ -21,7 +21,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use blitz_traits::files::{ChosenFile, FileRequest, FileSource};
-use blitz_traits::node_id::NodeId;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send};
@@ -30,17 +29,12 @@ use objc2_ui_kit::{UIDocumentPickerDelegate, UIDocumentPickerViewController, UIV
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::BlitzShellProxy;
-
-/// What a picker answers to: the window and input that asked.
+/// What a picker answers to.
 pub struct Asked {
-    proxy: BlitzShellProxy,
-    window: Arc<dyn Window>,
-    target: NodeId,
     directory: bool,
     /// Answered once: UIKit calls one of the two callbacks, but a picker
     /// dismissed some other way is not left to answer twice.
-    answered: Cell<bool>,
+    answer: Cell<Option<super::Answer>>,
 }
 
 define_class!(
@@ -74,11 +68,9 @@ impl PickerDelegate {
     }
 
     fn answer(&self, files: Option<Vec<ChosenFile>>) {
-        let asked = self.ivars();
-        if asked.answered.replace(true) {
-            return;
+        if let Some(answer) = self.ivars().answer.take() {
+            answer(files);
         }
-        super::answer(&asked.proxy, &*asked.window, asked.target, files);
     }
 }
 
@@ -137,12 +129,7 @@ fn presenter(window: &dyn Window) -> Option<Retained<UIViewController>> {
     Some(top)
 }
 
-pub(super) fn pick(
-    window: &Arc<dyn Window>,
-    proxy: &BlitzShellProxy,
-    target: NodeId,
-    request: FileRequest,
-) -> bool {
+pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
     };
@@ -160,11 +147,8 @@ pub(super) fn pick(
     let delegate = PickerDelegate::new(
         mtm,
         Asked {
-            proxy: proxy.clone(),
-            window: window.clone(),
-            target,
             directory: request.directory,
-            answered: Cell::new(false),
+            answer: Cell::new(Some(answer)),
         },
     );
     picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));

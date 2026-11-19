@@ -40,6 +40,28 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             return;
         }
 
+        // PATCH(diaryx): Return or Space on a file input opens its picker, as
+        // a press does and a browser's keys do.
+        #[cfg(feature = "file-input")]
+        if event.state.is_pressed()
+            && !event.is_auto_repeating
+            && event.modifiers.is_empty()
+            && (matches!(&event.key, Key::Named(NamedKey::Enter))
+                || matches!(&event.key, Key::Character(c) if c == " "))
+            && let Some(node_id) = doc.focus_node_id.filter(|id| *id == target)
+            && doc
+                .get_node(node_id)
+                .and_then(|n| n.element_data())
+                .is_some_and(|el| {
+                    el.name.local == local_name!("input")
+                        && el.attr(local_name!("type")) == Some("file")
+                        && el.attr(local_name!("disabled")).is_none()
+                })
+        {
+            super::file_input::open_picker(doc, node_id, &mut dispatch_event);
+            return;
+        }
+
         // Handle copy (Ctrl+C/Cmd+C) for text selection when no text input is focused
         if event.state.is_pressed() {
             let action_mod = event.modifiers.contains(ACTION_MOD);

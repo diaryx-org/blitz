@@ -21,28 +21,23 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use blitz_traits::files::{Accept, FileRequest};
-use blitz_traits::node_id::NodeId;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::dbus::{Bus, Call, METHOD_RETURN, SIGNAL, Value};
-use crate::BlitzShellProxy;
 
-pub(super) fn pick(
-    window: &Arc<dyn Window>,
-    proxy: &BlitzShellProxy,
-    target: NodeId,
-    request: FileRequest,
-) -> bool {
+pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     let parent = parent_window(&**window);
     let folder = super::last_folder();
     let directory = request.directory;
-    super::on_thread(window, proxy, target, directory, move || {
-        match portal(&parent, &request, folder.as_ref()) {
+    super::on_thread(
+        directory,
+        move || match portal(&parent, &request, folder.as_ref()) {
             Ok(answer) => answer,
             Err(_) => fallback(&request, folder.as_ref()),
-        }
-    })
+        },
+        answer,
+    )
 }
 
 /// The portal's name for the window the picker belongs to.

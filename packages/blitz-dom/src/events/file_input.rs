@@ -310,6 +310,37 @@ mod tests {
     }
 
     #[test]
+    fn return_or_space_on_the_focused_input_opens_its_picker() {
+        use blitz_traits::events::{BlitzKeyEvent, KeyState};
+        use keyboard_types::{Code, Key, Location, Modifiers, NamedKey};
+        let (mut doc, picker, input) = page(&[("accept", ".md")]);
+        doc.set_focus_to(input);
+        let press = |key: Key| {
+            UiEvent::KeyDown(BlitzKeyEvent {
+                key,
+                code: Code::Unidentified,
+                modifiers: Modifiers::empty(),
+                location: Location::Standard,
+                is_auto_repeating: false,
+                is_composing: false,
+                state: KeyState::Pressed,
+                text: None,
+            })
+        };
+        for key in [Key::Named(NamedKey::Enter), Key::Character(" ".into())] {
+            let mut driver = EventDriver::new(&mut doc as &mut dyn Document, Heard::default());
+            driver.handle_ui_event(press(key));
+        }
+        let asked = picker.0.lock().unwrap();
+        assert_eq!(asked.len(), 2, "a picker for each key");
+        assert!(
+            asked
+                .iter()
+                .all(|(t, r)| *t == input && r.extensions() == ["md"])
+        );
+    }
+
+    #[test]
     fn a_cancel_keeps_the_files_and_fires_cancel() {
         let (mut doc, _, input) = page(&[]);
         answer(&mut doc, input, Some(vec![file("a.md")]));

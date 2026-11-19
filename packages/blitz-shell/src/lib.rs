@@ -26,7 +26,10 @@ pub use crate::accessibility::{
 
 pub use crate::application::BlitzApplication;
 pub use crate::event::{BlitzShellEvent, BlitzShellProxy};
+// PATCH(diaryx): a picker opened from code, and what it asks for and gives.
+pub use crate::files::{ChooseFiles, choose_files};
 pub use crate::window::{View, WindowConfig};
+pub use blitz_traits::files::{Accept, ChosenFile, FileRequest, FileSource};
 
 #[cfg(feature = "data-uri")]
 pub use crate::net::DataUriNetProvider;
