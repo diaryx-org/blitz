@@ -20,16 +20,13 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use blitz_traits::files::{Accept, ChosenFile, FileRequest, FileSource};
+use blitz_traits::files::{ChosenFile, FileRequest, FileSource};
 use blitz_traits::node_id::NodeId;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send};
-use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSString, NSURL};
+use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSURL};
 use objc2_ui_kit::{UIDocumentPickerDelegate, UIDocumentPickerViewController, UIViewController};
-use objc2_uniform_type_identifiers::{
-    UTType, UTTypeAudio, UTTypeFolder, UTTypeImage, UTTypeItem, UTTypeMovie, UTTypeText,
-};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
@@ -122,38 +119,6 @@ fn chosen(urls: &[Retained<NSURL>], directory: bool) -> Vec<ChosenFile> {
     out
 }
 
-/// The UTTypes `request` offers: a folder for `webkitdirectory`; else
-/// those `accept` names, or any document if it names none, or one UIKit
-/// does not know (which, left out, could not be offered at all).
-fn content_types(request: &FileRequest) -> Vec<Retained<UTType>> {
-    let any = || vec![unsafe { UTTypeItem }.retain()];
-    if request.directory {
-        return vec![unsafe { UTTypeFolder }.retain()];
-    }
-    if request.accept.is_empty() {
-        return any();
-    }
-    let mut types = Vec::new();
-    for accept in &request.accept {
-        let ty = match accept {
-            Accept::Extension(e) => UTType::typeWithFilenameExtension(&NSString::from_str(e)),
-            Accept::Mime(m) => UTType::typeWithMIMEType(&NSString::from_str(m)),
-            Accept::Group(g) => match g.as_str() {
-                "image" => Some(unsafe { UTTypeImage }.retain()),
-                "audio" => Some(unsafe { UTTypeAudio }.retain()),
-                "video" => Some(unsafe { UTTypeMovie }.retain()),
-                "text" => Some(unsafe { UTTypeText }.retain()),
-                _ => None,
-            },
-        };
-        match ty {
-            Some(ty) => types.push(ty),
-            None => return any(),
-        }
-    }
-    types
-}
-
 /// The view controller to present over: the window's, or what it already
 /// presents (a sheet the page put up), topmost.
 fn presenter(window: &dyn Window) -> Option<Retained<UIViewController>> {
@@ -184,7 +149,8 @@ pub(super) fn pick(
     let Some(presenter) = presenter(&**window) else {
         return false;
     };
-    let types = NSArray::from_retained_slice(&content_types(&request));
+    let types = super::uttypes::of(&request).unwrap_or_else(super::uttypes::any);
+    let types = NSArray::from_retained_slice(&types);
     let picker = UIDocumentPickerViewController::initForOpeningContentTypes_asCopy(
         UIDocumentPickerViewController::alloc(mtm),
         &types,
