@@ -78,6 +78,9 @@ version = "=0.8.0-alpha.3"
 version = "=0.8.0-alpha.3"
 default-features = false
 
+[dependencies.bytes]
+version = "1"
+
 [dependencies.futures-util]
 version = "0.3.32"
 default-features = false

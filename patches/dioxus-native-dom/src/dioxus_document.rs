@@ -1,8 +1,8 @@
 //! Integration between Dioxus and Blitz
 use crate::NodeId;
 use crate::events::{
-    BlitzKeyboardData, NativeConverter, NativeFocusData, NativeFormData, NativePointerData,
-    NativeScrollData, NativeTouchData, NativeWheelData, NodeHandle,
+    BlitzKeyboardData, NativeCancelData, NativeConverter, NativeFocusData, NativeFormData,
+    NativePointerData, NativeScrollData, NativeTouchData, NativeWheelData, NodeHandle,
 };
 use crate::mutation_writer::DioxusState;
 use crate::qual_name;
@@ -321,10 +321,16 @@ impl EventHandler for DioxusEventHandler<'_> {
                 Some(wrap_event_data(BlitzKeyboardData(kevent.clone())))
             }
 
-            DomEventData::Input(data) => Some(wrap_event_data(NativeFormData {
-                value: data.value.clone(),
-                values: vec![],
-            })),
+            // PATCH(diaryx): a file input's files with its `input` and
+            // `change`, and its `cancel`.
+            DomEventData::Input(data) | DomEventData::Change(data) => {
+                Some(wrap_event_data(NativeFormData {
+                    value: data.value.clone(),
+                    values: vec![],
+                    files: data.files.clone(),
+                }))
+            }
+            DomEventData::Cancel(_) => Some(wrap_event_data(NativeCancelData)),
 
             // TODO: Implement IME handling
             DomEventData::Ime(_) => None,

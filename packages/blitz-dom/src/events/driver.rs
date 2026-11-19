@@ -226,6 +226,7 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
             UiEvent::KeyDown(_) => focussed_node_id,
             UiEvent::Ime(_) => focussed_node_id,
             UiEvent::AppleStandardKeybinding(_) => focussed_node_id,
+            UiEvent::FilesChosen { target, .. } => Some(target),
         };
         // Fall back to the root element. A document without a root element (e.g. an
         // empty iframe sub-document) has no event target, so there is nothing to do.
@@ -292,6 +293,19 @@ impl<'doc, Handler: EventHandler> EventDriver<'doc, Handler> {
                     DomEvent::new(target, DomEventData::AppleStandardKeybinding(data));
                 self.run_default_action(&mut dom_event);
                 self.process_queue();
+            }
+            // PATCH(diaryx): the picker's answer for a file input: its files,
+            // then `input` and `change`, or `cancel`.
+            UiEvent::FilesChosen { target, files } => {
+                #[cfg(feature = "file-input")]
+                {
+                    let events = self.doc.inner_mut().files_chosen(target, files);
+                    for event in events {
+                        self.handle_dom_event(event);
+                    }
+                }
+                #[cfg(not(feature = "file-input"))]
+                let _ = (target, files);
             }
         };
 

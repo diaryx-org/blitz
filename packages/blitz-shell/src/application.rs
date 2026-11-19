@@ -99,6 +99,15 @@ impl<Rend: WindowRenderer> BlitzApplication<Rend> {
                     }
                 }
             }
+            BlitzShellEvent::FilesChosen {
+                window_id,
+                target,
+                files,
+            } => {
+                if let Some(window) = self.windows.get_mut(&window_id) {
+                    window.files_chosen(target, files);
+                }
+            }
             BlitzShellEvent::Embedder(_) => {
                 // Do nothing. Should be handled by embedders (if required).
             }

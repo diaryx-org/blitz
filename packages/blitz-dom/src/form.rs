@@ -296,8 +296,13 @@ fn construct_entry_list(doc: &BaseDocument, form_id: NodeId, submitter_id: NodeI
             }
             // Otherwise, for each file in selected files, create an entry with name and a File object representing the file, and append it to entry list.
             else {
-                for path_buf in files.iter() {
-                    create_entry(name, path_buf.clone().into());
+                for file in files.iter() {
+                    // A file the system handed over whole has no path to
+                    // send it from.
+                    match file.path() {
+                        Some(path) => create_entry(name, path.to_path_buf().into()),
+                        None => create_entry(name, EntryValue::EmptyFile),
+                    }
                 }
             }
             continue;

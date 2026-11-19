@@ -670,7 +670,10 @@ pub(crate) fn handle_click(
                     let value = is_checked.to_string();
                     dispatch_event(DomEvent::new(
                         node_id,
-                        DomEventData::Input(BlitzInputEvent { value }),
+                        DomEventData::Input(BlitzInputEvent {
+                            value,
+                            files: Vec::new(),
+                        }),
                     ));
                     generate_focus_events(
                         doc,
@@ -697,7 +700,10 @@ pub(crate) fn handle_click(
                     let value = String::from("true");
                     dispatch_event(DomEvent::new(
                         node_id,
-                        DomEventData::Input(BlitzInputEvent { value }),
+                        DomEventData::Input(BlitzInputEvent {
+                            value,
+                            files: Vec::new(),
+                        }),
                     ));
 
                     generate_focus_events(
@@ -782,40 +788,10 @@ pub(crate) fn handle_click(
                         doc.submit_form(*form_owner, node_id);
                     }
                 }
+                // PATCH(diaryx): the system's picker, answered later.
                 #[cfg(feature = "file-input")]
                 local_name!("input") if el.attr(local_name!("type")) == Some("file") => {
-                    use crate::qual_name;
-                    //TODO: Handle accept attribute https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/accept by passing an appropriate filter
-                    let multiple = el.attr(local_name!("multiple")).is_some();
-                    let files = doc.shell_provider.open_file_dialog(multiple, None);
-
-                    if let Some(file) = files.first() {
-                        el.attrs
-                            .set(qual_name!("value", html), &file.to_string_lossy());
-                    }
-                    let text_content = match files.len() {
-                        0 => "No Files Selected".to_string(),
-                        1 => files
-                            .first()
-                            .unwrap()
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string(),
-                        x => format!("{x} Files Selected"),
-                    };
-
-                    if files.is_empty() {
-                        el.special_data = SpecialElementData::None;
-                    } else {
-                        el.special_data = SpecialElementData::FileInput(files.into())
-                    }
-                    let child_label_id = doc.nodes[node_id].children[1];
-                    let child_text_id = doc.nodes[child_label_id].children[0];
-                    let text_data = doc.nodes[child_text_id]
-                        .text_data_mut()
-                        .expect("Text data not found");
-                    text_data.content = text_content;
+                    super::file_input::open_picker(doc, node_id, dispatch_event);
                 }
                 _ => {}
             }

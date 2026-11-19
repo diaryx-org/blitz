@@ -9,6 +9,7 @@ use keyboard_types::{Code, Key, Location, Modifiers};
 use smol_str::SmolStr;
 
 use crate::NodeId;
+use crate::files::ChosenFile;
 
 #[derive(Default)]
 pub struct EventState {
@@ -71,6 +72,14 @@ pub enum UiEvent {
     KeyDown(BlitzKeyEvent),
     Ime(BlitzImeEvent),
     AppleStandardKeybinding(SmolStr),
+    // PATCH(diaryx): a file picker's answer.
+    /// The system's picker has answered the file input `target`'s request
+    /// ([`ShellProvider::pick_files`](crate::shell::ShellProvider::pick_files)):
+    /// the files chosen, or `None` if it was cancelled.
+    FilesChosen {
+        target: NodeId,
+        files: Option<Vec<ChosenFile>>,
+    },
 }
 impl UiEvent {
     pub fn discriminant(&self) -> u8 {
@@ -155,6 +164,11 @@ pub enum DomEventKind {
     FocusOut,
 
     AppleStandardKeybinding,
+
+    // PATCH(diaryx): a file input's `change` and `cancel`. Last, here and in
+    // `DomEventData`, whose discriminants these are.
+    Change,
+    Cancel,
 }
 impl DomEventKind {
     pub fn discriminant(self) -> u8 {
@@ -204,6 +218,9 @@ impl FromStr for DomEventKind {
             "blur" => Ok(Self::Blur),
             "focusin" => Ok(Self::FocusIn),
             "focusout" => Ok(Self::FocusOut),
+
+            "change" => Ok(Self::Change),
+            "cancel" => Ok(Self::Cancel),
             _ => Err(()),
         }
     }
@@ -253,6 +270,12 @@ pub enum DomEventData {
     FocusOut(BlitzFocusEvent),
 
     AppleStandardKeybinding(SmolStr),
+
+    // PATCH(diaryx): last, as in `DomEventKind`.
+    /// A file input's files changed: after its `input`.
+    Change(BlitzInputEvent),
+    /// A file input's picker was dismissed with nothing chosen.
+    Cancel(BlitzInputEvent),
 }
 impl DomEventData {
     pub fn discriminant(&self) -> u8 {
@@ -308,6 +331,8 @@ impl DomEventData {
             Self::FocusOut { .. } => "focusout",
 
             Self::AppleStandardKeybinding { .. } => "applekeybinding",
+            Self::Change { .. } => "change",
+            Self::Cancel { .. } => "cancel",
         }
     }
 
@@ -354,6 +379,8 @@ impl DomEventData {
             Self::FocusOut { .. } => DomEventKind::FocusOut,
 
             Self::AppleStandardKeybinding { .. } => DomEventKind::AppleStandardKeybinding,
+            Self::Change { .. } => DomEventKind::Change,
+            Self::Cancel { .. } => DomEventKind::Cancel,
         }
     }
 
@@ -400,6 +427,8 @@ impl DomEventData {
             Self::FocusOut { .. } => false,
 
             Self::AppleStandardKeybinding { .. } => true,
+            Self::Change { .. } => false,
+            Self::Cancel { .. } => false,
         }
     }
 
@@ -446,6 +475,9 @@ impl DomEventData {
             Self::FocusOut { .. } => true,
 
             Self::AppleStandardKeybinding { .. } => false,
+            // Both bubble, as a browser fires them at a file input.
+            Self::Change { .. } => true,
+            Self::Cancel { .. } => true,
         }
     }
 }
@@ -725,9 +757,12 @@ pub struct BlitzKeyEvent {
     pub text: Option<SmolStr>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BlitzInputEvent {
     pub value: String,
+    // PATCH(diaryx): a file input's files.
+    /// A file input's files, as chosen; empty for any other input.
+    pub files: Vec<ChosenFile>,
 }
 
 #[derive(Clone, Debug)]

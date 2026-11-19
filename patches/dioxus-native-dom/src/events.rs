@@ -6,6 +6,10 @@ use blitz_traits::events::{
     BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzScrollEvent, BlitzWheelDelta,
     BlitzWheelEvent, MouseEventButton,
 };
+use blitz_traits::files::ChosenFile;
+use bytes::Bytes;
+use dioxus_core::CapturedError;
+use dioxus_html::NativeFileData;
 use dioxus_html::{
     AnimationData, BeforeInputData, CancelData, ClipboardData, CompositionData, DragData,
     FocusData, FormData, FormValue, HasFileData, HasFocusData, HasFormData, HasKeyboardData,
@@ -25,6 +29,7 @@ use dioxus_html::{
     },
 };
 use keyboard_types::{Code, Key, Location, Modifiers};
+use std::path::PathBuf;
 use std::{
     any::Any,
     cell::{Ref, RefCell, RefMut},
@@ -39,8 +44,9 @@ use crate::NodeId;
 pub struct NativeConverter {}
 
 impl HtmlEventConverter for NativeConverter {
-    fn convert_cancel_data(&self, _event: &PlatformEventData) -> CancelData {
-        unimplemented!("todo: convert_cancel_data in dioxus-native. requires support in blitz")
+    fn convert_cancel_data(&self, event: &PlatformEventData) -> CancelData {
+        // PATCH(diaryx): a file input's picker dismissed.
+        event.downcast::<NativeCancelData>().unwrap().clone().into()
     }
 
     fn convert_form_data(&self, event: &PlatformEventData) -> FormData {
@@ -315,6 +321,9 @@ impl RenderedElementBacking for NodeHandle {
 pub struct NativeFormData {
     pub value: String,
     pub values: Vec<(String, FormValue)>,
+    // PATCH(diaryx): a file input's files.
+    /// A file input's files, as Blitz holds them; empty for any other.
+    pub files: Vec<ChosenFile>,
 }
 
 impl HasFormData for NativeFormData {
@@ -337,7 +346,74 @@ impl HasFormData for NativeFormData {
 
 impl HasFileData for NativeFormData {
     fn files(&self) -> Vec<dioxus_html::FileData> {
-        vec![]
+        self.files
+            .iter()
+            .cloned()
+            .map(|f| dioxus_html::FileData::new(NativeFile(f)))
+            .collect()
+    }
+}
+
+// PATCH(diaryx): a file Blitz's file input holds, as Dioxus reads one.
+/// A file chosen in a file input: on disk, read when the page asks, or
+/// handed over whole by the system's picker.
+struct NativeFile(ChosenFile);
+
+impl NativeFileData for NativeFile {
+    fn name(&self) -> String {
+        self.0.name.clone()
+    }
+    fn size(&self) -> u64 {
+        self.0.size
+    }
+    fn last_modified(&self) -> u64 {
+        self.0.last_modified
+    }
+    /// Its path on disk; a file handed over whole has none, and gives its
+    /// path within the folder chosen, or its name.
+    fn path(&self) -> PathBuf {
+        self.0
+            .path()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(&self.0.relative_path))
+    }
+    fn content_type(&self) -> Option<String> {
+        self.0.content_type.clone()
+    }
+    fn read_bytes(&self) -> Pin<Box<dyn Future<Output = Result<Bytes, CapturedError>> + 'static>> {
+        let file = self.0.clone();
+        Box::pin(async move { file.read().map_err(CapturedError::from) })
+    }
+    fn byte_stream(
+        &self,
+    ) -> Pin<Box<dyn futures_util::Stream<Item = Result<Bytes, CapturedError>> + 'static + Send>>
+    {
+        let file = self.0.clone();
+        Box::pin(futures_util::stream::once(async move {
+            file.read().map_err(CapturedError::from)
+        }))
+    }
+    fn read_string(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, CapturedError>> + 'static>> {
+        let file = self.0.clone();
+        Box::pin(async move {
+            let bytes = file.read().map_err(CapturedError::from)?;
+            String::from_utf8(bytes.to_vec()).map_err(CapturedError::from)
+        })
+    }
+    fn inner(&self) -> &dyn Any {
+        &self.0
+    }
+}
+
+// PATCH(diaryx): `cancel`, which carries nothing.
+#[derive(Clone, Debug)]
+pub struct NativeCancelData;
+
+impl dioxus_html::HasCancelData for NativeCancelData {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
     }
 }
 
@@ -676,6 +752,7 @@ pub fn synthetic_form_event(
     Box::new(NativeFormData {
         value: value.into(),
         values: values.into(),
+        files: Vec::new(),
     })
 }
 

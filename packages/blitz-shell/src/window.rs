@@ -139,6 +139,18 @@ impl<Rend: WindowRenderer> Drop for View<Rend> {
 }
 
 impl<Rend: WindowRenderer> View<Rend> {
+    // PATCH(diaryx): a file picker's answer.
+    /// The system's file picker has answered the file input `target`.
+    pub fn files_chosen(
+        &mut self,
+        target: blitz_traits::node_id::NodeId,
+        files: Option<Vec<blitz_traits::files::ChosenFile>>,
+    ) {
+        self.doc
+            .handle_ui_event(UiEvent::FilesChosen { target, files });
+        self.request_redraw();
+    }
+
     pub fn init(
         config: WindowConfig<Rend>,
         event_loop: &dyn ActiveEventLoop,
