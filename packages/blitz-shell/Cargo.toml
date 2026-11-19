@@ -54,6 +54,20 @@ web-time = { workspace = true }
 web-sys = { workspace = true, features = ["HtmlCanvasElement", "Window"] }
 wasm-bindgen = { workspace = true }
 
+# PATCH(diaryx): UIKit's document picker, for a file input (src/files/ios.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std", "NSArray", "NSObject", "NSString", "NSURL", "NSFileManager", "NSData",
+] }
+objc2-ui-kit = { version = "0.3.2", default-features = false, features = [
+    "std", "block2", "UIDocumentPickerViewController", "UIViewController", "UIResponder",
+    "objc2-uniform-type-identifiers",
+] }
+objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = [
+    "std", "UTType", "UTCoreTypes",
+] }
+
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6.0" }
 

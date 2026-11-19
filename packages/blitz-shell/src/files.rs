@@ -9,6 +9,7 @@
 //!   window on the Mac and its child elsewhere, filtered by the input's
 //!   `accept`, opening in the folder the last file was chosen from. On
 //!   Linux, the desktop's own through its portal.
+//! - **iOS**: UIKit's document picker over the window ([`ios`]).
 //!
 //! Elsewhere there is no picker, and the document falls back to
 //! `ShellProvider::open_file_dialog`.
@@ -144,6 +145,9 @@ mod desktop {
     }
 }
 
+#[cfg(target_os = "ios")]
+mod ios;
+
 /// Show the system's picker for the file input `target` in `window`, and
 /// answer through `proxy`. False where there is none.
 #[allow(unused_variables)]
@@ -166,6 +170,8 @@ pub(crate) fn pick(
         )
     ))]
     return desktop::pick(window, proxy, target, request);
+    #[cfg(target_os = "ios")]
+    return ios::pick(window, proxy, target, request);
     #[allow(unreachable_code)]
     false
 }

@@ -149,6 +149,10 @@ Events and layout, found by diaryx-org/unit's gallery:
   `value` is a browser's (`C:\fakepath\…`). The page reads them through
   Dioxus's `files()` (`patches/dioxus-native-dom`). Found by a KeePass
   client on diaryx-org/unit's components, choosing a database.
+- On iOS, a file input's picker is UIKit's document picker, presented over
+  the window (`packages/blitz-shell/src/files/ios.rs`): `accept` as UTTypes,
+  files taken as copies the app reads by path, a folder's files read while
+  access to it is granted. rfd has no iOS picker, so upstream had none.
 - An empty text input or textarea paints its `placeholder`, laid out in its
   own styles and faded to Firefox's `::placeholder` opacity (0.54); upstream
   gave it to the accessibility tree and never drew it, so a field showed
