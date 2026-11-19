@@ -17,6 +17,8 @@
 //!   the XDG desktop portal over D-Bus (`dbus.rs`, a client of our own), or
 //!   zenity or kdialog where there is no portal.
 //! - **iOS** (`ios.rs`): UIKit's document picker over the window.
+//! - **The web** (`web.rs`), Blitz drawing into a canvas: the browser's own,
+//!   through a hidden `<input type=file>` of the page's, its files read whole.
 //!
 //! Elsewhere there is no picker, and the document falls back to
 //! `ShellProvider::open_file_dialog`.
@@ -134,6 +136,8 @@ mod ios;
 mod macos;
 #[cfg(any(target_os = "ios", all(feature = "file-dialog", target_os = "macos")))]
 mod uttypes;
+#[cfg(all(feature = "file-dialog", target_arch = "wasm32"))]
+mod web;
 
 /// Show the system's picker for the file input `target` in `window`, and
 /// answer through `proxy`. False where there is none.
@@ -161,6 +165,8 @@ pub(crate) fn pick(
     return linux::pick(window, proxy, target, request);
     #[cfg(target_os = "ios")]
     return ios::pick(window, proxy, target, request);
+    #[cfg(all(feature = "file-dialog", target_arch = "wasm32"))]
+    return web::pick(window, proxy, target, request);
     #[allow(unreachable_code)]
     false
 }
