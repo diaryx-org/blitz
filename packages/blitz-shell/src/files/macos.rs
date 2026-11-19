@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use blitz_traits::files::FileRequest;
-use blitz_traits::node_id::NodeId;
 use block2::RcBlock;
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -22,8 +21,6 @@ use objc2_app_kit::{NSModalResponse, NSModalResponseOK, NSOpenPanel, NSView, NSW
 use objc2_foundation::{NSArray, NSString, NSURL};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
-
-use crate::BlitzShellProxy;
 
 /// The AppKit window `window` is drawn in.
 fn ns_window(window: &dyn Window) -> Option<Retained<NSWindow>> {
@@ -37,12 +34,7 @@ fn ns_window(window: &dyn Window) -> Option<Retained<NSWindow>> {
     view.window()
 }
 
-pub(super) fn pick(
-    window: &Arc<dyn Window>,
-    proxy: &BlitzShellProxy,
-    target: NodeId,
-    request: FileRequest,
-) -> bool {
+pub(super) fn pick(window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     let Some(mtm) = MainThreadMarker::new() else {
         return false;
     };
@@ -61,17 +53,15 @@ pub(super) fn pick(
     }
 
     let parent = ns_window(&**window);
-    let window = window.clone();
-    let proxy = proxy.clone();
     let directory = request.directory;
     let chosen = panel.clone();
-    // The handler is called once; a second call (which AppKit does not make)
-    // would answer an input twice.
-    let answered = Cell::new(false);
+    // Answered once: the handler is called once, and a second call (which
+    // AppKit does not make) finds the answer taken.
+    let answer = Cell::new(Some(answer));
     let done = RcBlock::new(move |response: NSModalResponse| {
-        if answered.replace(true) {
+        let Some(answer) = answer.take() else {
             return;
-        }
+        };
         let paths: Option<Vec<PathBuf>> = (response == NSModalResponseOK).then(|| {
             chosen
                 .URLs()
@@ -79,7 +69,7 @@ pub(super) fn pick(
                 .filter_map(|u| u.path().map(|p| PathBuf::from(p.to_string())))
                 .collect()
         });
-        super::on_thread(&window, &proxy, target, directory, move || paths);
+        super::on_thread(directory, move || paths, answer);
     });
     match parent {
         // A sheet on the window that asked, as a browser's is.

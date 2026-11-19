@@ -17,14 +17,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use blitz_traits::files::{Accept, ChosenFile, FileRequest};
-use blitz_traits::node_id::NodeId;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{File, HtmlInputElement};
 use winit::window::Window;
-
-use crate::BlitzShellProxy;
 
 /// `request`'s `accept`, written back as an attribute.
 fn accept_attr(request: &FileRequest) -> String {
@@ -60,12 +57,7 @@ async fn read(file: File) -> Option<ChosenFile> {
     Some(chosen)
 }
 
-pub(super) fn pick(
-    window: &Arc<dyn Window>,
-    proxy: &BlitzShellProxy,
-    target: NodeId,
-    request: FileRequest,
-) -> bool {
+pub(super) fn pick(_window: &Arc<dyn Window>, request: FileRequest, answer: super::Answer) -> bool {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return false;
     };
@@ -97,23 +89,19 @@ pub(super) fn pick(
     }
 
     // Answered once: by `change` or by `cancel`, whichever comes.
-    let answered = Rc::new(Cell::new(false));
+    let answer = Rc::new(Cell::new(Some(answer)));
     let on_change = {
         let input = input.clone();
-        let answered = answered.clone();
-        let proxy = proxy.clone();
-        let window = window.clone();
+        let answer = answer.clone();
         Closure::<dyn FnMut()>::new(move || {
-            if answered.replace(true) {
+            let Some(answer) = answer.take() else {
                 return;
-            }
+            };
             let files: Vec<File> = input
                 .files()
                 .map(|list| (0..list.length()).filter_map(|i| list.get(i)).collect())
                 .unwrap_or_default();
             input.remove();
-            let proxy = proxy.clone();
-            let window = window.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let mut chosen = Vec::new();
                 for f in files {
@@ -121,29 +109,22 @@ pub(super) fn pick(
                 }
                 #[cfg(feature = "tracing")]
                 tracing::info!(
-                    "file input {target:?}: {:?}",
+                    "files read: {:?}",
                     chosen.iter().map(|f| (&f.name, f.size)).collect::<Vec<_>>()
                 );
-                super::answer(
-                    &proxy,
-                    &*window,
-                    target,
-                    (!chosen.is_empty()).then_some(chosen),
-                );
+                answer((!chosen.is_empty()).then_some(chosen));
             });
         })
     };
     let on_cancel = {
         let input = input.clone();
-        let answered = answered.clone();
-        let proxy = proxy.clone();
-        let window = window.clone();
+        let answer = answer.clone();
         Closure::<dyn FnMut()>::new(move || {
-            if answered.replace(true) {
+            let Some(answer) = answer.take() else {
                 return;
-            }
+            };
             input.remove();
-            super::answer(&proxy, &*window, target, None);
+            answer(None);
         })
     };
     let _ = input.add_event_listener_with_callback("change", on_change.as_ref().unchecked_ref());

@@ -157,6 +157,11 @@ Events and layout, found by diaryx-org/unit's gallery:
   the window as parent on X11; `zenity`, else `kdialog`, where there is no
   portal. Run here against a real dbus-daemon, xdg-desktop-portal-gtk and
   zenity 4.
+- Return or Space on a focused file input opens its picker, as a press does.
+  And an app opens a picker from its own code, for a menu's Open… or a
+  shortcut, where there is no file input to press:
+  `blitz_shell::choose_files(&window, request).await`, with a file input's
+  defaults.
 - On the web, with Blitz drawing into a canvas, a file input's picker is
   the browser's own: the page is given a hidden `<input type=file>` of its
   own with the input's `accept`, `multiple` and `webkitdirectory`, clicked
