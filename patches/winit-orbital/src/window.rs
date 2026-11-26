@@ -22,6 +22,7 @@ const ORBITAL_FLAG_BORDERLESS: char = 'l';
 const ORBITAL_FLAG_MAXIMIZED: char = 'm';
 const ORBITAL_FLAG_FULLSCREEN: char = 'M';
 const ORBITAL_FLAG_RESIZABLE: char = 'r';
+const ORBITAL_FLAG_SCALABLE: char = 's';
 const ORBITAL_FLAG_TRANSPARENT: char = 't';
 
 #[derive(Debug)]
@@ -60,8 +61,13 @@ impl Window {
 
         // TODO: min/max surface_size
 
-        // Async by default.
+        // Async by default. Scalable: on a HiDPI screen Orbital sends the window a
+        // `ScaleEvent`, which becomes its scale factor (`EventOption::Scale` in
+        // `event_loop.rs`), and gives the pointer in points, not pixels. The size
+        // asked for here is in points, as at scale 1: the window grows to pixels
+        // when the scale comes.
         let mut flag_str = ORBITAL_FLAG_ASYNC.to_string();
+        flag_str.push(ORBITAL_FLAG_SCALABLE);
 
         // Fullscreen takes precedence over maximize
         if let Some(Fullscreen::Borderless(_)) = attrs.fullscreen {
@@ -189,7 +195,7 @@ impl CoreWindow for Window {
 
     #[inline]
     fn scale_factor(&self) -> f64 {
-        1.
+        self.window_socket.scale()
     }
 
     #[inline]
@@ -244,7 +250,9 @@ impl CoreWindow for Window {
     fn request_surface_size(&self, size: Size) -> Option<PhysicalSize<u32>> {
         let (w, h): (u32, u32) = size.to_physical::<u32>(self.scale_factor()).into();
         self.window_socket.write(format!("S,{w},{h}").as_bytes()).expect("failed to set size");
-        None
+        // Orbital resizes the window at once and sends no `ResizeEvent` for a size
+        // the app asked for, so the new size is the answer, not an event to come.
+        Some((w, h).into())
     }
 
     #[inline]

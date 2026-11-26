@@ -8,9 +8,10 @@ use std::time::{Duration, Instant};
 use std::{iter, mem, slice};
 
 use bitflags::bitflags;
+use dpi::PhysicalSize;
 use orbclient::{
     ButtonEvent, EventOption, FocusEvent, HoverEvent, KeyEvent, MouseEvent, MouseRelativeEvent,
-    MoveEvent, QuitEvent, ResizeEvent, ScrollEvent, TextInputEvent,
+    MoveEvent, QuitEvent, ResizeEvent, ScaleEvent, ScrollEvent, TextInputEvent,
 };
 use redox_event::{EventFlags, EventQueue, UserData};
 use smol_str::SmolStr;
@@ -356,6 +357,7 @@ impl EventLoop {
     }
 
     fn process_event<A: ApplicationHandler>(
+        window: &RedoxSocket,
         window_id: WindowId,
         event_option: EventOption,
         event_state: &mut EventState,
@@ -439,7 +441,10 @@ impl EventLoop {
                 event_state.text_input_event = Some(event);
             },
             EventOption::Mouse(MouseEvent { x, y }) => {
-                event_state.mouse_pos = (x, y);
+                // A scalable window is given the pointer in points: back to pixels.
+                let scale = window.scale();
+                event_state.mouse_pos =
+                    ((x as f64 * scale).round() as i32, (y as f64 * scale).round() as i32);
                 app.window_event(window_target, window_id, event::WindowEvent::PointerMoved {
                     device_id: None,
                     primary: true,
@@ -493,6 +498,49 @@ impl EventLoop {
 
                 // Acknowledge resize after event loop.
                 event_state.resize_opt = Some((width, height));
+            },
+            EventOption::Scale(ScaleEvent { scale, baseline }) => {
+                if scale <= 0 || baseline <= 0 {
+                    return;
+                }
+                let new = scale as f64 / baseline as f64;
+                let old = window.scale();
+                if new == old {
+                    return;
+                }
+                window.set_scale(new);
+
+                // The window keeps its size in points: its pixels grow with the scale,
+                // unless Orbital sized it to the screen (maximized or fullscreen).
+                let mut buf: [u8; 4096] = [0; 4096];
+                let path = window.fpath(&mut buf).expect("failed to read properties");
+                let properties = WindowProperties::new(path);
+                let current = PhysicalSize::new(properties.w, properties.h);
+                let fills_screen = properties.flags.contains('m') || properties.flags.contains('M');
+                let suggested = if fills_screen {
+                    current
+                } else {
+                    PhysicalSize::new(
+                        (current.width as f64 * new / old).round() as u32,
+                        (current.height as f64 * new / old).round() as u32,
+                    )
+                };
+                let size = Arc::new(Mutex::new(suggested));
+                app.window_event(window_target, window_id, event::WindowEvent::ScaleFactorChanged {
+                    scale_factor: new,
+                    surface_size_writer: event::SurfaceSizeWriter::new(Arc::downgrade(&size)),
+                });
+                let size = *size.lock().unwrap();
+                if size != current {
+                    // Orbital sends no `ResizeEvent` for a size the app sets: say it here.
+                    app.window_event(
+                        window_target,
+                        window_id,
+                        event::WindowEvent::SurfaceResized(size),
+                    );
+                }
+                // Set the size (when it changed) and redraw, after the loop.
+                event_state.resize_opt = Some((size.width, size.height));
             },
             // TODO: Screen, Clipboard, Drop
             EventOption::Hover(HoverEvent { entered }) => {
@@ -615,6 +663,7 @@ impl EventLoop {
 
                 for orbital_event in events {
                     Self::process_event(
+                        window,
                         window_id,
                         orbital_event.to_option(),
                         event_state,

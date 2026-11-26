@@ -8,6 +8,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Result, Write};
 use std::os::fd::AsRawFd;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fmt, mem, slice, str};
 
 use libredox::data::TimeSpec;
@@ -24,6 +25,9 @@ pub mod window;
 #[derive(Debug)]
 struct RedoxSocket {
     fd: File,
+    /// The window's scale factor (an `f64`'s bits), from Orbital's `ScaleEvent`
+    /// to a window opened with the scalable flag; 1 until one comes.
+    scale: AtomicU64,
 }
 
 impl RedoxSocket {
@@ -37,7 +41,15 @@ impl RedoxSocket {
     // were called at the same time by multiple threads.
     fn open_raw(path: &str) -> Result<Self> {
         let fd = OpenOptions::new().read(true).write(true).open(path)?;
-        Ok(Self { fd })
+        Ok(Self { fd, scale: AtomicU64::new(1f64.to_bits()) })
+    }
+
+    fn scale(&self) -> f64 {
+        f64::from_bits(self.scale.load(Ordering::Relaxed))
+    }
+
+    fn set_scale(&self, scale: f64) {
+        self.scale.store(scale.to_bits(), Ordering::Relaxed);
     }
 
     fn fd(&self) -> usize {
