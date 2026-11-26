@@ -674,6 +674,9 @@ enum WindowKind {
     Wayland,
     X11,
     AngleX11,
+    /// Redox's Orbital, through Mesa's Orbital EGL platform (EGL 1.4 entry points).
+    #[cfg_attr(not(target_os = "redox"), allow(dead_code))]
+    Orbital,
     Unknown,
 }
 
@@ -843,6 +846,26 @@ impl crate::Instance for Instance {
                 .map_err(instance_err("failed to get XCB display"))?;
                 (display, WindowKind::X11)
             }
+            // Redox: Orbital has no display object. Mesa's Orbital platform (the Redox
+            // fork's `platform_orbital.c`) has no EGL_EXT_platform_* enum, so it is reached
+            // through eglGetDisplay(EGL_DEFAULT_DISPLAY) with EGL_PLATFORM=orbital. An
+            // instance made without a display handle is taken as Orbital's too, so that
+            // `wgpu::Instance::new` followed by `create_surface(window)` works as it does
+            // on other platforms with a single window system.
+            #[cfg(target_os = "redox")]
+            (Some(Rdh::Orbital(_)) | None, _) => {
+                if std::env::var_os("EGL_PLATFORM").is_none() {
+                    // SAFETY-ish: done once, before any EGL display exists; the
+                    // instance is normally made before the program has other threads.
+                    std::env::set_var("EGL_PLATFORM", "orbital");
+                }
+                log::debug!("Using Orbital platform (Redox)");
+                let display =
+                    unsafe { egl.get_display(khronos_egl::DEFAULT_DISPLAY) }.ok_or_else(|| {
+                        crate::InstanceError::new("Failed to get the Orbital display".into())
+                    })?;
+                (display, WindowKind::Orbital)
+            }
             x if client_ext_str.contains("EGL_MESA_platform_surfaceless") => {
                 log::debug!(
                     "No (or unknown) windowing system ({x:?}) present. Using surfaceless platform"
@@ -964,6 +987,8 @@ impl crate::Instance for Instance {
                 }
             }
             (Rwh::Wayland(_), _) => {}
+            #[cfg(target_os = "redox")]
+            (Rwh::Orbital(_), _) => {}
             #[cfg(Emscripten)]
             (Rwh::Web(_), _) => {}
             other => {
@@ -1274,6 +1299,10 @@ impl crate::Surface for Surface {
                     }
                     #[cfg(Emscripten)]
                     (WindowKind::Unknown, Rwh::Web(handle)) => handle.id as *mut ffi::c_void,
+                    // The native window of Mesa's Orbital platform is the window's fd,
+                    // which is what winit-orbital puts in the handle.
+                    #[cfg(target_os = "redox")]
+                    (WindowKind::Orbital, Rwh::Orbital(handle)) => handle.window.as_ptr(),
                     (WindowKind::Unknown, Rwh::Win32(handle)) => {
                         handle.hwnd.get() as *mut ffi::c_void
                     }
@@ -1341,7 +1370,9 @@ impl crate::Surface for Surface {
 
                 // Careful, we can still be in 1.4 version even if `upcast` succeeds
                 let raw_result = match egl1_5 {
-                    Some(egl) if self.wsi.kind != WindowKind::Unknown => {
+                    Some(egl)
+                        if !matches!(self.wsi.kind, WindowKind::Unknown | WindowKind::Orbital) =>
+                    {
                         let attributes_usize = attributes
                             .into_iter()
                             .map(|v| v as usize)

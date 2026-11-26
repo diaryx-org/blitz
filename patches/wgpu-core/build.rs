@@ -12,6 +12,7 @@ fn main() {
         webgl: { all(target_arch = "wasm32", not(target_os = "emscripten"), feature = "webgl") },
         gles: { any(
             all(windows_linux_android, feature = "gles"), // Regular GLES
+            all(target_os = "redox", feature = "gles"), // Redox: GLES over Mesa's EGL (Orbital)
             all(webgl), // WebGL
             all(target_os = "emscripten", feature = "gles"), // Emscripten GLES
             all(target_vendor = "apple", feature = "angle") // ANGLE on Apple

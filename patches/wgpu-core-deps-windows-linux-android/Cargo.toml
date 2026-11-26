@@ -39,7 +39,7 @@ vulkan = ["wgpu-hal/vulkan"]
 name = "wgpu_core_deps_windows_linux_android"
 path = "src/lib.rs"
 
-[target.'cfg(any(windows, target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "netbsd"))'.dependencies.wgpu-hal]
+[target.'cfg(any(windows, target_os = "linux", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "redox"))'.dependencies.wgpu-hal]
 version = "30.0.0"
 
 [lints.clippy]
