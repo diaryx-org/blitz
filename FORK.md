@@ -40,6 +40,16 @@ vello_shaders = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # On Android, with accessibility: AccessKit's adapter, with a fix it has not
 # released (patches/accesskit_android/PATCH.md)
 accesskit_android = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+# On Redox (Orbital): winit's backend with Orbital's HiDPI scale
+# (patches/winit-orbital/PATCH.md), and, for the `vello` feature on the GPU,
+# the four wgpu crates that build its GLES backend over Mesa's Orbital EGL
+# (patches/wgpu-hal/PATCH.md). Built only for Redox; patched everywhere, as
+# cargo cannot patch per target, where they are the published code.
+winit-orbital = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+wgpu = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+wgpu-core = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
+wgpu-hal = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
 # Or, with the `vello-hybrid` feature, the four that draw emoji, backdrop
 # filters and color matrices with it (patches/*/PATCH.md)
 anyrender_vello_hybrid = { git = "https://github.com/diaryx-org/blitz", branch = "leaf" }
@@ -77,7 +87,8 @@ names (`packages/`), and without it Cargo finds two candidates and stops.
   its tag. A change upstream now has is dropped then. The winit backends in
   `patches/` move with it, to the winit that release pins, and
   `anyrender_vello`, `anyrender_svg`, `anyrender_vello_hybrid`, `glifo`, `vello_gpu`,
-  `vello_gpu_shaders` and `vello_shaders` to the anyrender and vello it takes; each goes when its fix is in that release.
+  `vello_gpu_shaders` and `vello_shaders` to the anyrender and vello it takes,
+  and the four wgpu crates to the wgpu that anyrender takes; each goes when its fix is in that release.
 - **A winit fix** goes upstream to winit, not Blitz (each `PATCH.md` says
   where it stands).
 - Commits follow the diaryx-org rules: Conventional Commits, a
